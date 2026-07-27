@@ -1,0 +1,50 @@
+"""Tenant config repository."""
+from typing import TypedDict
+
+from app.db.engine import get_session
+from app.db.models import TenantConfig
+
+
+class TenantRecord(TypedDict):
+    tenant_id: str
+    wa_api_key_encrypted: bytes
+    google_sheet_id: str
+    payment_provider: str
+    owner_wa_number: str
+
+
+def insert_tenant(
+    tenant_id: str,
+    wa_api_key_encrypted: bytes,
+    google_sheet_id: str,
+    owner_wa_number: str,
+    payment_provider: str = "xendit",
+) -> None:
+    """Insert a new tenant config row."""
+    with get_session() as session:
+        tenant = TenantConfig(
+            tenant_id=tenant_id,
+            wa_api_key_encrypted=wa_api_key_encrypted,
+            google_sheet_id=google_sheet_id,
+            owner_wa_number=owner_wa_number,
+            payment_provider=payment_provider,
+        )
+        session.add(tenant)
+        session.commit()
+
+
+def get_tenant(tenant_id: str) -> TenantRecord | None:
+    """Fetch tenant config. Returns None if not found."""
+    with get_session() as session:
+        tenant: TenantConfig | None = (
+            session.query(TenantConfig).filter_by(tenant_id=tenant_id).first()
+        )
+        if tenant is None:
+            return None
+        return TenantRecord(
+            tenant_id=tenant.tenant_id,
+            wa_api_key_encrypted=tenant.wa_api_key_encrypted,
+            google_sheet_id=tenant.google_sheet_id,
+            payment_provider=tenant.payment_provider,
+            owner_wa_number=tenant.owner_wa_number,
+        )

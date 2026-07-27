@@ -28,3 +28,7 @@ htmlcov/
 
 # Logs
 *.log
+
+# Egg info / build
+ordercloser_lite.egg-info/
+OrderCloser_Lite_PRD_Final.md
