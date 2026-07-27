@@ -7,12 +7,15 @@ venv/
 
 # Environment & secrets
 .env
+.env.*
 *.key
+# Sensitive DBs/SQL
+*.db
+*.sqlite
+*.sql
 
-# Runtime data
-data/*.db
-data/*.sqlite
-data/*.sqlite3
+# Runtime data (ignore entire folder)
+data/
 
 # Google Sheets credentials
 secrets/*.json
