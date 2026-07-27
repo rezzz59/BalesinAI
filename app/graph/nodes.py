@@ -80,7 +80,7 @@ def compose_reply(state: ChatState) -> dict:
     if intent == "check_product":
         if state.get("product_match"):
             p = state["product_match"]
-            ready = "✅ Ready stock" if p.get("ready") == "Y" else "❌ Habis"
+            ready = "Ready stock" if p.get("ready") == "Y" else "❌ Habis"
             return {
                 "reply_text": (
                     f"{p['nama_produk']} — {p.get('harga', '-')}\n"

@@ -86,10 +86,11 @@ class AnthropicLLMClient(LLMClient):
 class GeminiLLMClient(LLMClient):
     """Wraps the new google-genai SDK for Gemini intent classification.
 
-    Uses the free-tier friendly model `gemini-2.0-flash-lite` by default.
+    Uses a readily available model that works with the free tier.
+    To change the model, edit the MODEL constant or pass via env var.
     """
 
-    MODEL = "gemini-2.0-flash-lite"
+    MODEL = "gemini-3.1-flash-lite"
 
     def __init__(self, api_key: str):
         import google.genai as genai  # noqa: E402 (lazy import; only needed when used)
@@ -144,7 +145,7 @@ class GeminiLLMClient(LLMClient):
         except json.JSONDecodeError as e:
             raise LLMError(f"Invalid JSON from Gemini: {e}") from e
         except Exception as e:  # noqa: BLE001
-            logger.error("gemini_call_failed", error=str(e))
+            logger.exception("gemini_call_failed: %s", e)
             raise LLMError(f"Gemini API error: {e}") from e
 
 
