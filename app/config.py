@@ -1,5 +1,4 @@
 """Application configuration via pydantic-settings."""
-import base64
 from functools import lru_cache
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -20,8 +19,8 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     gemini_api_key: str = ""
 
-    # Required (must be provided)
-    encryption_key: str = base64.b64encode(b"x" * 32).decode()  # 32-byte key
+    # Required (must be provided via environment)
+    encryption_key: str = ""
     wablas_base_url: str = "https://api.wablas.example"
     google_sheets_credentials_json_path: str = "./secrets/sheets-sa.json"
     google_sheets_spreadsheet_id: str = ""  # filled from tenant context or env
