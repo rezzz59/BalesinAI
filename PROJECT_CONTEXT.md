@@ -110,17 +110,21 @@ LOG_LEVEL=INFO
 
 ---
 
-## Current Status (as of commit 8397923)
+## Current Status (as of commit b0f63b3)
 
 ✅ **Working:**
-- FastAPI server starts on port 8765
+- FastAPI server starts on port 8000
 - `/docs` Swagger UI accessible
 - `.env` key loaded successfully
-- Gemini API connection verified (key valid, model working)
-- Intent classification producing correct JSON output
-- Full graph flow end-to-end working (when all clients injected)
-- Logger bug fixed in `llm.py` line 147
+- LLM classification works (Gemini SDK optional — MockLLMClient fallback available)
+- Full graph flow end-to-end working (with fallback for missing Sheets/Wablas)
+- Logger bug fixed in `llm.py` (extra kwarg must be dict, not string)
 - Model switched to `gemini-3.1-flash-lite` (stable quota)
+- Webhook authentication (Bearer token & HMAC signature) works correctly
+- Input validation at webhook endpoint rejects missing fields
+- Sheets errors caught gracefully — fallback to no-match path
+- `/health` endpoint returns dependency readiness status
+- Integration tests for webhook auth (tests/test_webhook.py) added
 
 ⏳ **Pending/Needs Setup:**
 - Wablas API key required for actual WhatsApp sending/receiving
@@ -137,17 +141,22 @@ LOG_LEVEL=INFO
 | `logger.error()` crashed on kwarg `error=` | Use `logger.exception(msg, e)` instead | `llm.py:147` |
 | Gemini free-tier quota exhausted | Switched to `gemini-3.1-flash-lite` | `llm.py:MODEL` |
 | Missing `.env` entries early in config loading | Added guard to avoid empty key warning | `config.py:validation` |
+| `asyncio.run() cannot be called from a running event loop` crash on webhook | Convert async node wrappers to sync nodes; use `_run_async_from_sync` helper to bridge inside FastAPI handler | `app/graph/graph.py` |
+| Sheets lookup raising FileNotFoundError/SDK errors crashed webhook 500 | Wrap `lookup_catalog` body in try/except and fall through to no-match | `app/graph/nodes.py` |
+| Webhook accepted empty `wa_number`/`thread_id`/`message_text` silently | Required-field validation with 400 + list of missing fields | `app/main.py` |
+| Server couldn't boot when `google-genai` SDK not installed | `MockLLMClient` heuristic fallback in `_create_llm_client()` | `app/main.py`, `app/services/llm.py` |
 
 ---
 
 ## Next Steps
 
-1. Add Wablas API key to `.env` and test `/webhook/wablas` endpoint with curl
-2. Set up Google Sheets service account and test sheets client
-3. Create `checkpoints.db` and verify checkpointer
-4. Write integration tests for the full graph flow
-5. Add environment validation at app startup (`/health` should reflect dependencies)
-6. Commit any remaining `.env` changes to local repo only (not pushed)
+1. Provision real Wablas API key and test full WhatsApp round-trip
+2. Set up Google Sheets service account JSON (`secrets/sheets-sa.json`) for live FAQ/catalog lookup
+3. Verify `checkpoints.db` SQLite file is created and persists conversation state
+4. Add more integration tests covering the full graph flow (intent → catalog → reply → log)
+5. When deploying to real host, switch auth default from Bearer token to HMAC signature (more secure)
+6. Replace `MockLLMClient` with real `GeminiLLMClient` once `google-genai` SDK is installed in production env
+7. Push `feat/fase1-mvp` branch to origin and open PR for review
 
 ---
 
