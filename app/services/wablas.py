@@ -15,7 +15,7 @@ class WablasError(Exception):
 class WablasClient:
     """Async client for Wablas WhatsApp API.
 
-    Endpoint: POST /api/v1/send-message
+    Endpoint: POST /api/send-message
     Auth: Bearer <api_key> header
     Body: {"phone": "+62xxx", "message": "text"}
     """
@@ -31,7 +31,7 @@ class WablasClient:
 
         Retries 3x on 5xx with exponential backoff. Raises WablasError after exhaustion.
         """
-        url = f"{self.base_url}/api/v1/send-message"
+        url = f"{self.base_url}/api/send-message"
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
