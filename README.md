@@ -31,7 +31,7 @@ uvicorn app.main:app --reload --port 8000
 
 ## Testing
 
-```bash
+```bash 
 pytest -v
 ```
 
