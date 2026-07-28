@@ -1,40 +1,135 @@
-# OrderCloser Lite
+# OrderCloser Lite 🤖
 
 AI agent berbasis LangGraph untuk auto-reply WhatsApp + fallback ke owner.
 
+Fitur utama:
+- **Classifikasi intent** menggunakan Gemini API (Google GenAI)
+- **Auto-reply dinamis** lookup catalog dari Google Sheets
+- **Fallback ke owner** otomatis saat tidak bisa bantu
+- **Support multi-gateway**: Wablas atau Fonnte WhatsApp gateway
+
 ## Quick Start
 
+### 1. Setup Lingkungan
+
 ```bash
-# Setup
 python -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
+```
 
-# Configure
+### 2. Konfigurasi `.env`
+
+Buat file `.env` dari template dan sesuaikan:
+
+```bash
 cp .env.example .env
-# Edit .env — at minimum:
-#   ANTHROPIC_API_KEY
-#   ENCRYPTION_KEY (generate via: python scripts/gen_encryption_key.py)
-#   GOOGLE_SHEETS_CREDENTIALS_JSON_PATH (setup guide: docs/setup.md)
+nano .env
+```
 
-# Seed tenant
-python scripts/gen_encryption_key.py
+**Variable wajib:**
+
+| Env Var | Description |
+|---------|-------------|
+| `ANTHROPIC_API_KEY` | Key LLM Anthropic/Gemini |
+| `ENCRYPTION_KEY` | Kunci Fernet untuk enkripsi data (generate via `python scripts/gen_encryption_key.py`) |
+| `GOOGLE_SHEETS_CREDENTIALS_JSON_PATH` | Path ke service account JSON |
+
+**WhatsApp Gateway (pilih salah satu):**
+
+```env
+# Option A: Menggunakan Wablas (default)
+WHATAPP_GATEWAY=wablas
+WABLAS_BASE_URL=https://api.wablas.example
+WABLAS_API_KEY=<your_wablas_key>
+
+# Option B: Menggunakan Fonnte (recommended)
+WHATAPP_GATEWAY=fonnte
+FONTTE_API_KEY=<your_fonnte_api_key>
+```
+
+> 💡 Tip: Ganti `WHATAPP_GATEWAY` di `.env` untuk ganti gateway. API key Fonnte masuk sesuai field `FONTTE_API_KEY` (huruf N ganda).
+
+### 3. Generate Kunci Enkripsi & Seed Tenant
+
+```bash
+python scripts/gen_encryption_key.py  # Output: xN5JAsZO7lnG9XkRX9fC3BUV7Wf1WHTC4As4N8rnjlg (simpan di .env)
 python scripts/seed_tenant.py \
     --tenant demo \
     --sheet-id YOUR_GOOGLE_SHEET_ID \
-    --wa-number +6281234567890 \
-    --api-key YOUR_WABLAS_API_KEY
+    --wa-number +628XXXXXXXXX \
+    --api-key <wablas_fonnte_key>
+```
 
-# Run
+### 4. Jalankan Server
+
+```bash
 uvicorn app.main:app --reload --port 8000
 ```
 
+Endpoint webhook: `POST http://localhost:8000/webhook`
+
 ## Testing
 
-```bash 
+### Run Test Suites
+
+```bash
+# Semua tests
 pytest -v
+
+# Khusus Fonnte
+pytest tests/test_fonnte.py -v
+
+# LLM classification (mock)
+pytest tests/test_llm.py -v
 ```
 
-## Architecture
+Coverage: 80%+ (termasuk FonnteGateway dengan 8 test cases).
 
-See [design spec](../specs/2026-07-27-ordercloser-lite-fase1-design.md).
+### Kirim Pesan Uji Manual
+
+```bash
+# Via Fonnte gateway (pastikan WHATSAPP_GATEWAY=fonnte)
+python scripts/test_fonnte_send.py
+```
+
+## Arsitekture
+
+```
+app/
+├── main.py                 # FastAPI app, auth middleware, webhook endpoint
+├── graph/
+│   ├── __init__.py
+│   ├── graph.py            # LangGraph StateGraph build (nodes + edges)
+│   └── nodes.py            # Node logics: compose_reply, send_whatsapp, fallback_human
+├── services/
+│   ├── llm.py              # Gemini/Anthropic LLM client
+│   ├── sheets.py           # Google Sheets client
+│   ├── phone_gateway.py    # Abstract base (PhoneGateway, PhoneGatewayException)
+│   ├── fonnte.py           # FonnteGateway implementation (retry, HTTP POST)
+│   └── wablas.py           # WablasClient implementation (HMAC signature)
+├── auth/                   # Auth middleware & signature verification
+└── db/                     # SQLite checkpointer for LangGraph persistence
+```
+
+Design spec lengkap: [docs/2026-07-27-ordercloser-lite-fase1-design.md](docs/2026-07-27-ordercloser-lite-fase1-design.md)
+
+## File Penting
+
+| File | Deskripsi |
+|------|-----------|
+| `.env` | Environment variables (jangan committed!) |
+| `pyproject.toml` | Dependencies & dev config |
+| `scripts/gen_encryption_key.py` | Generate Fernet encryption key |
+| `scripts/seed_tenant.py` | Seed data tenant + catalog |
+| `scripts/test_fonnte_send.py` | Script manual kirim pesan uji |
+
+## Contributions
+
+- Report issue di GitHub
+- PR enhancements (misal tambah gateway lain, fix bug)
+- Tambahkan test coverage untuk feature baru
+
+---
+
+🚀 Built on LangGraph + FastAPI + Google Gemini
