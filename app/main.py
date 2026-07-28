@@ -1,4 +1,5 @@
 """FastAPI entry point for OrderCloser Lite WhatsApp AI Agent."""
+import json
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -11,6 +12,7 @@ from fastapi.responses import JSONResponse
 from app.config import get_settings
 from app.db import init_db  # Ensure DB tables are created
 from app.db.checkpointer import SqliteCheckpointer
+from app.auth.signature import verify_wablas_signature, SignatureError
 from app.graph.graph import (
     build_graph,
     reset_compiled_graph_for_testing,
@@ -61,18 +63,17 @@ _compiled_graph: Any = None
 
 
 def _create_llm_client():
+    """Create LLM client, falling back to MockLLMClient if real SDK is unavailable."""
+    from app.services.llm import get_llm_client, MockLLMClient, LLMError
+
     settings = get_settings()
     backend = (settings.llm_backend or "gemini").lower()
-    if backend == "anthropic":
-        if not settings.anthropic_api_key:
-            raise RuntimeError("ANTHROPIC_API_KEY not set")
-        return AnthropicLLMClient(api_key=settings.anthropic_api_key)
-    elif backend == "gemini":
-        if not settings.gemini_api_key:
-            raise RuntimeError("GEMINI_API_KEY not set")
-        return GeminiLLMClient(api_key=settings.gemini_api_key)
-    else:
-        raise RuntimeError(f"unknown LLM backend: {backend}")
+
+    try:
+        return get_llm_client()
+    except (ImportError, ModuleNotFoundError, LLMError) as e:
+        logger.warning(f"Real LLM client initialization failed: {e}. Using MockLLMClient for testing.")
+        return MockLLMClient()
 
 
 def _create_sheets_client():
@@ -98,19 +99,42 @@ def _create_wablas_client():
 
 def _ensure_clients():
     global _llm_client, _sheets_client, _wablas_client, _checkpointer, _compiled_graph
-    if _llm_client is None:
-        _llm_client = _create_llm_client()
-    if _sheets_client is None:
-        _sheets_client = _create_sheets_client()
-    if _wablas_client is None:
-        _wablas_client = _create_wablas_client()
+    try:
+        if _llm_client is None:
+            _llm_client = _create_llm_client()
+            logger.info(
+                "llm_client_initialized",
+                extra={"backend": getattr(_llm_client, "backend", "unknown")},
+            )
+    except Exception as e:
+        logger.error("llm_client_init_failed", exc_info=True)
+        _llm_client = None  # Menandai failure
+    try:
+        if _sheets_client is None:
+            _sheets_client = _create_sheets_client()
+            logger.info("sheets_client_initialized")
+    except Exception as e:
+        logger.error("sheets_client_init_failed", exc_info=True)
+        _sheets_client = None
+    try:
+        if _wablas_client is None:
+            _wablas_client = _create_wablas_client()
+            logger.info("wablas_client_initialized")
+    except Exception as e:
+        logger.error("wablas_client_init_failed", exc_info=True)
+        _wablas_client = None
     if _checkpointer is None:
         _checkpointer = SqliteCheckpointer()
-        logger.info("init_checkpointer", extra="SQLite-backed checkpointer ready")
+        logger.info("init_checkpointer", extra={"info": "SQLite-backed checkpointer ready"})
     if _compiled_graph is None:
-        _compiled_graph = build_graph(
-            _llm_client, _sheets_client, _wablas_client, checkpointer=_checkpointer
-        )
+        try:
+            _compiled_graph = build_graph(
+                _llm_client, _sheets_client, _wablas_client, checkpointer=_checkpointer
+            )
+            logger.info("graph_compiled", extra={"status": "ready"})
+        except Exception as e:
+            logger.error("graph_build_failed", exc_info=True)
+            raise RuntimeError(f"Failed to compile graph: {e}") from e
 
 
 # --- API Endpoints ---
@@ -118,19 +142,76 @@ def _ensure_clients():
 
 @app.post("/webhook/whatsapp/")
 async def whatsapp_webhook(request: Request):
-    """Webhook endpoint for incoming WhatsApp messages."""
+    """Webhook endpoint for incoming WhatsApp messages with signature verification."""
+    # Get raw request body for signature verification
     try:
-        data = await request.json()
+        raw_body = await request.body()
     except Exception:
+        raise HTTPException(status_code=400, detail="Unable to read request body")
+
+    # Parse JSON data separately
+    try:
+        data = json.loads(raw_body.decode("utf-8"))
+    except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="Invalid JSON payload")
+
+    # Get Wablas API key for auth verification
+    settings = get_settings()
+    wablas_api_key = settings.wablas_api_key or ""
+    if not wablas_api_key:
+        raise HTTPException(
+            status_code=500, detail="WABLAS_API_KEY not configured on server"
+        )
+
+    # Verify Wablas authentication — supports two methods:
+    # 1. Authorization header: Bearer <API_KEY> (token-based)
+    # 2. X-Wablas-Signature header (HMAC-SHA256 of body)
+    auth_header = request.headers.get("Authorization", "")
+
+    if auth_header.startswith("Bearer "):
+        # Method 1: Token-based auth
+        provided_token = auth_header[7:]  # Remove "Bearer "
+        if provided_token != wablas_api_key:
+            raise HTTPException(status_code=401, detail="Invalid API key")
+    else:
+        # Method 2: Signature-based auth
+        signature_header = request.headers.get("X-Wablas-Signature")
+        if not signature_header:
+            raise HTTPException(
+                status_code=401,
+                detail="Missing X-Wablas-Signature or Authorization header",
+            )
+        try:
+            verify_wablas_signature(signature_header, raw_body, wablas_api_key)
+        except SignatureError as e:
+            raise HTTPException(status_code=401, detail=f"Signature error: {e}")
+
+    tenant_id = data.get("tenant_id", "default")
+    wa_number = data.get("wa_number", "")
+    thread_id = data.get("thread_id", "")
+    message_text = data.get("message_text", "")
+
+    # Validate required fields
+    missing = []
+    if not wa_number:
+        missing.append("wa_number")
+    if not thread_id:
+        missing.append("thread_id")
+    if not message_text:
+        missing.append("message_text")
+    if missing:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Missing required fields: {', '.join(missing)}",
+        )
 
     _ensure_clients()
 
     state: ChatState = {
-        "tenant_id": data.get("tenant_id", "default"),
-        "wa_number": data.get("wa_number", ""),
-        "thread_id": data.get("thread_id", ""),
-        "message_text": data.get("message_text", ""),
+        "tenant_id": tenant_id,
+        "wa_number": wa_number,
+        "thread_id": thread_id,
+        "message_text": message_text,
         "timestamp": datetime.now(),
     }
 

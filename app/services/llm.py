@@ -28,6 +28,23 @@ class LLMClient(metaclass=abc.ABCMeta):
         pass
 
 
+class MockLLMClient(LLMClient):
+    """Deterministic classifier for local dev / testing / when SDK missing.
+
+    Uses simple keyword heuristics — no external API call. Never raises.
+    """
+
+    def classify(self, message: str) -> ClassificationResult:
+        msg = (message or "").lower()
+        if any(kw in msg for kw in ("stok", "ready", "ada ga", "ada nggak", "ready stock", "tersedia")):
+            return {"intent": "check_product", "confidence": 0.95}
+        if any(kw in msg for kw in ("order", "pesan", "beli", "booking", "checkout")):
+            return {"intent": "confirm_order", "confidence": 0.92}
+        if any(kw in msg for kw in ("?", "apa", "bagaimana", "kapan", "dimana", "gimana")):
+            return {"intent": "faq", "confidence": 0.8}
+        return {"intent": "unclear", "confidence": 0.4}
+
+
 # Attempt to import Anthropic SDK; optional - required only if using Anthropic backend
 try:
     import anthropic

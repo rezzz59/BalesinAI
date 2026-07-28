@@ -39,30 +39,37 @@ def lookup_catalog(state: ChatState, sheets_client: Any) -> dict:
     """
     intent = state["intent"]
 
-    if intent == "faq":
-        match = sheets_client.lookup_faq(state["message_text"])
-        if match is None:
-            logger.info(
-                "faq_no_match",
-                extra={"tenant_id": state["tenant_id"], "thread_id": state["thread_id"]},
-            )
+    try:
+        if intent == "faq":
+            match = sheets_client.lookup_faq(state["message_text"])
+            if match is None:
+                logger.info(
+                    "faq_no_match",
+                    extra={"tenant_id": state["tenant_id"], "thread_id": state["thread_id"]},
+                )
+                return {}
+            return {"catalog_answer": match["jawaban"], "product_match": None}
+
+        if intent == "check_product":
+            products = sheets_client.read_catalog()
+            message_lower = state["message_text"].lower()
+            words = [w for w in message_lower.split() if len(w) >= 3]
+            for product in products:
+                nama = (product.get("nama_produk") or "").lower()
+                if any(w in nama for w in words):
+                    return {
+                        "catalog_answer": None,
+                        "product_match": product,
+                    }
             return {}
-        return {"catalog_answer": match["jawaban"], "product_match": None}
 
-    if intent == "check_product":
-        products = sheets_client.read_catalog()
-        message_lower = state["message_text"].lower()
-        words = [w for w in message_lower.split() if len(w) >= 3]
-        for product in products:
-            nama = (product.get("nama_produk") or "").lower()
-            if any(w in nama for w in words):
-                return {
-                    "catalog_answer": None,
-                    "product_match": product,
-                }
         return {}
-
-    return {}
+    except Exception as e:  # noqa: BLE001
+        logger.error(
+            "sheets_lookup_failed",
+            extra={"tenant_id": state["tenant_id"], "error": str(e)},
+        )
+        return {}
 
 
 def compose_reply(state: ChatState) -> dict:

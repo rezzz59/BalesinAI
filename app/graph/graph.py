@@ -1,4 +1,6 @@
 """LangGraph state graph assembly & routing functions."""
+import asyncio
+import concurrent.futures
 import logging
 from typing import Any
 
@@ -16,6 +18,27 @@ from app.graph.nodes import (
 from app.graph.state import ChatState
 
 logger = logging.getLogger(__name__)
+
+
+def _run_async_from_sync(coro):
+    """Run a coroutine from a sync context, even if an event loop is running.
+
+    Uses a worker thread to spin up a private event loop. This avoids
+    'event loop already running' errors when graph nodes (sync) are
+    called from inside an async FastAPI request handler.
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+
+    # Loop already running — execute in dedicated thread
+    def _runner():
+        return asyncio.run(coro)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(_runner)
+        return future.result()
 
 
 def should_fallback(state: ChatState, threshold: float | None = None) -> bool:
@@ -45,27 +68,29 @@ def route_after_lookup(state: ChatState) -> str:
     return "compose_reply"
 
 
-async def _classify_node_async(state, llm_client):
-    """Async wrapper for classify_intent (which is sync)."""
+def _classify_node_sync(state, llm_client):
+    """Sync wrapper for classify_intent (which is sync)."""
     return classify_intent(state, llm_client=llm_client)
 
 
-async def _lookup_node_async(state, sheets_client):
-    """Async wrapper for lookup_catalog."""
+def _lookup_node_sync(state, sheets_client):
+    """Sync wrapper for lookup_catalog."""
     return lookup_catalog(state, sheets_client=sheets_client)
 
 
-async def _compose_async(state):
+def _compose_sync(state):
     return compose_reply(state)
 
 
-async def _send_async(state, wablas_client):
-    state.update(await send_whatsapp(state, wablas_client=wablas_client))
+def _send_sync(state, wablas_client):
+    result = _run_async_from_sync(send_whatsapp(state, wablas_client=wablas_client))
+    state.update(result)
     return {}
 
 
-async def _fallback_async(state, wablas_client):
-    state.update(await fallback_human(state, wablas_client=wablas_client))
+def _fallback_sync(state, wablas_client):
+    result = _run_async_from_sync(fallback_human(state, wablas_client=wablas_client))
+    state.update(result)
     return {}
 
 
@@ -101,13 +126,13 @@ def build_graph(
     """
     g = StateGraph(ChatState, checkpointer=checkpointer)
 
-    # Add nodes
-    g.add_node("classify_intent", lambda s: _classify_node_async(s, llm_client))
-    g.add_node("lookup_catalog", lambda s: _lookup_node_async(s, sheets_client))
-    g.add_node("compose_reply", _compose_async)
+    # Add nodes (all sync — async operations bridge via _run_async_from_sync)
+    g.add_node("classify_intent", lambda s: _classify_node_sync(s, llm_client))
+    g.add_node("lookup_catalog", lambda s: _lookup_node_sync(s, sheets_client))
+    g.add_node("compose_reply", _compose_sync)
     g.add_node("compose_reply_fallback", _compose_fallback_node)
-    g.add_node("send_whatsapp", lambda s: _send_async(s, wablas_client))
-    g.add_node("fallback_human", lambda s: _fallback_async(s, wablas_client))
+    g.add_node("send_whatsapp", lambda s: _send_sync(s, wablas_client))
+    g.add_node("fallback_human", lambda s: _fallback_sync(s, wablas_client))
     g.add_node("write_chat_log", write_chat_log)
 
     # Edges
