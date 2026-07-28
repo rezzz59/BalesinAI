@@ -82,14 +82,14 @@ def _compose_sync(state):
     return compose_reply(state)
 
 
-def _send_sync(state, wablas_client):
-    result = _run_async_from_sync(send_whatsapp(state, wablas_client=wablas_client))
+def _send_sync(state, gateway_client):
+    result = _run_async_from_sync(send_whatsapp(state, gateway_client=gateway_client))
     state.update(result)
     return {}
 
 
-def _fallback_sync(state, wablas_client):
-    result = _run_async_from_sync(fallback_human(state, wablas_client=wablas_client))
+def _fallback_sync(state, gateway_client):
+    result = _run_async_from_sync(fallback_human(state, gateway_client=gateway_client))
     state.update(result)
     return {}
 
@@ -107,15 +107,13 @@ async def _compose_fallback_node(state):
     }
 
 
-def build_graph(
-    llm_client, sheets_client, wablas_client, checkpointer: Any = None
-):
+def build_graph(llm_client, sheets_client, gateway_client, checkpointer: Any = None):
     """Construct and compile the StateGraph.
 
     Args:
         llm_client: LLM client for classification.
         sheets_client: Sheets client for catalog/FAQ lookups.
-        wablas_client: Wablas client for sending WhatsApp messages.
+        gateway_client: Phone gateway (Wablas or Fonnte) for sending WhatsApp messages.
         checkpointer: Optional LangGraph saver for persisting checkpoints (e.g., SqliteCheckpointer).
 
     Flow:
@@ -131,8 +129,8 @@ def build_graph(
     g.add_node("lookup_catalog", lambda s: _lookup_node_sync(s, sheets_client))
     g.add_node("compose_reply", _compose_sync)
     g.add_node("compose_reply_fallback", _compose_fallback_node)
-    g.add_node("send_whatsapp", lambda s: _send_sync(s, wablas_client))
-    g.add_node("fallback_human", lambda s: _fallback_sync(s, wablas_client))
+    g.add_node("send_whatsapp", lambda s: _send_sync(s, gateway_client))
+    g.add_node("fallback_human", lambda s: _fallback_sync(s, gateway_client))
     g.add_node("write_chat_log", write_chat_log)
 
     # Edges
@@ -163,13 +161,13 @@ def build_graph(
 _compiled_graph = None
 
 
-def get_compiled_graph(llm_client=None, sheets_client=None, wablas_client=None):
+def get_compiled_graph(llm_client=None, sheets_client=None, gateway_client=None):
     """Get the compiled graph (lazy-init). Tests must inject clients."""
     global _compiled_graph
     if _compiled_graph is None:
-        if llm_client is None or sheets_client is None or wablas_client is None:
+        if llm_client is None or sheets_client is None or gateway_client is None:
             raise RuntimeError("Clients not injected — call build_graph() explicitly first")
-        _compiled_graph = build_graph(llm_client, sheets_client, wablas_client)
+        _compiled_graph = build_graph(llm_client, sheets_client, gateway_client)
     return _compiled_graph
 
 

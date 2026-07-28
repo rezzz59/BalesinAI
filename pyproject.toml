@@ -16,6 +16,7 @@ dependencies = [
     "sqlalchemy>=2.0",
     "cryptography>=43",
     "structlog>=24.1",
+    "google-genai>=2.14.0",  # Added for Gemini LLM backend support
 ]
 
 [project.optional-dependencies]

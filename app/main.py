@@ -24,6 +24,8 @@ from app.services.llm import (
     LLMError,
 )
 from app.services.sheets import GoogleSheetsClient
+from app.services.phone_gateway import PhoneGateway, PhoneGatewayException
+from app.services.fonnte import FonnteGateway, FonnteError
 from app.services.wablas import WablasClient, WablasError
 
 logging.basicConfig(level=logging.INFO)
@@ -57,7 +59,7 @@ app.add_middleware(
 # --- Client Initialization ---
 _llm_client: Optional[Any] = None
 _sheets_client: Optional[Any] = None
-_wablas_client: Optional[Any] = None
+_phone_gateway: Optional[Any] = None
 _checkpointer: Any = None  # LangGraph saver (e.g., SqliteCheckpointer)
 _compiled_graph: Any = None
 
@@ -89,16 +91,36 @@ def _create_sheets_client():
     )
 
 
-def _create_wablas_client():
+def _create_phone_gateway():
+    """Create phone gateway client based on WHATSAPP_GATEWAY config.
+
+    Returns:
+        - FonnteGateway if whatsapp_gateway == "fonnte"
+        - WablasClient if whatsapp_gateway == "wablas"
+
+    Raises:
+        RuntimeError if required env vars are missing for the chosen gateway.
+    """
     settings = get_settings()
-    if not settings.wablas_base_url:
-        raise RuntimeError("WABLAS_BASE_URL must be set")
-    api_key = settings.wablas_api_key or ""  # may be empty for some deployments that rely on per-tenant auth
-    return WablasClient(base_url=settings.wablas_base_url, api_key=api_key)
+    gateway = (settings.whatsapp_gateway or "wablas").lower()
+
+    if gateway == "fonnte":
+        if not settings.fonnte_api_key:
+            raise RuntimeError("FONNTE_API_KEY not configured")
+        return FonnteGateway(api_key=settings.fonnte_api_key)
+
+    elif gateway == "wablas":
+        if not settings.wablas_base_url:
+            raise RuntimeError("WABLAS_BASE_URL must be set")
+        api_key = settings.wablas_api_key or ""
+        return WablasClient(base_url=settings.wablas_base_url, api_key=api_key)
+
+    else:
+        raise RuntimeError(f"Unknown WHATSAPP_GATEWAY: {gateway}. Use 'wablas' or 'fonnte'.")
 
 
 def _ensure_clients():
-    global _llm_client, _sheets_client, _wablas_client, _checkpointer, _compiled_graph
+    global _llm_client, _sheets_client, _phone_gateway, _checkpointer, _compiled_graph
     try:
         if _llm_client is None:
             _llm_client = _create_llm_client()
@@ -117,19 +139,20 @@ def _ensure_clients():
         logger.error("sheets_client_init_failed", exc_info=True)
         _sheets_client = None
     try:
-        if _wablas_client is None:
-            _wablas_client = _create_wablas_client()
-            logger.info("wablas_client_initialized")
+        if _phone_gateway is None:
+            _phone_gateway = _create_phone_gateway()
+            gateway_type = type(_phone_gateway).__name__
+            logger.info(f"{gateway_type}_client_initialized")
     except Exception as e:
-        logger.error("wablas_client_init_failed", exc_info=True)
-        _wablas_client = None
+        logger.error("phone_gateway_init_failed", exc_info=True)
+        _phone_gateway = None
     if _checkpointer is None:
         _checkpointer = SqliteCheckpointer()
         logger.info("init_checkpointer", extra={"info": "SQLite-backed checkpointer ready"})
     if _compiled_graph is None:
         try:
             _compiled_graph = build_graph(
-                _llm_client, _sheets_client, _wablas_client, checkpointer=_checkpointer
+                _llm_client, _sheets_client, _phone_gateway, checkpointer=_checkpointer
             )
             logger.info("graph_compiled", extra={"status": "ready"})
         except Exception as e:
@@ -155,36 +178,55 @@ async def whatsapp_webhook(request: Request):
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="Invalid JSON payload")
 
-    # Get Wablas API key for auth verification
+    # Get API key for auth verification based on selected gateway
     settings = get_settings()
-    wablas_api_key = settings.wablas_api_key or ""
-    if not wablas_api_key:
-        raise HTTPException(
-            status_code=500, detail="WABLAS_API_KEY not configured on server"
-        )
+    gateway = (settings.whatsapp_gateway or "wablas").lower()
 
-    # Verify Wablas authentication — supports two methods:
-    # 1. Authorization header: Bearer <API_KEY> (token-based)
-    # 2. X-Wablas-Signature header (HMAC-SHA256 of body)
-    auth_header = request.headers.get("Authorization", "")
-
-    if auth_header.startswith("Bearer "):
-        # Method 1: Token-based auth
-        provided_token = auth_header[7:]  # Remove "Bearer "
-        if provided_token != wablas_api_key:
-            raise HTTPException(status_code=401, detail="Invalid API key")
-    else:
-        # Method 2: Signature-based auth
-        signature_header = request.headers.get("X-Wablas-Signature")
-        if not signature_header:
+    if gateway == "fonnte":
+        api_key = settings.fonnte_api_key or ""
+        if not api_key:
+            raise HTTPException(
+                status_code=500, detail="FONNTE_API_KEY not configured on server"
+            )
+        # Fonnte uses Bearer token auth
+        auth_header = request.headers.get("Authorization", "")
+        if not auth_header.startswith("Bearer "):
             raise HTTPException(
                 status_code=401,
-                detail="Missing X-Wablas-Signature or Authorization header",
+                detail="Missing Bearer Authorization header (Fonnte auth)",
             )
-        try:
-            verify_wablas_signature(signature_header, raw_body, wablas_api_key)
-        except SignatureError as e:
-            raise HTTPException(status_code=401, detail=f"Signature error: {e}")
+        provided_token = auth_header[7:]
+        if provided_token != api_key:
+            raise HTTPException(status_code=401, detail="Invalid Fonnte API key")
+    else:
+        # Wablas
+        wablas_api_key = settings.wablas_api_key or ""
+        if not wablas_api_key:
+            raise HTTPException(
+                status_code=500, detail="WABLAS_API_KEY not configured on server"
+            )
+        # Verify Wablas authentication — supports two methods:
+        # 1. Authorization header: Bearer <API_KEY> (token-based)
+        # 2. X-Wablas-Signature header (HMAC-SHA256 of body)
+        auth_header = request.headers.get("Authorization", "")
+
+        if auth_header.startswith("Bearer "):
+            # Method 1: Token-based auth
+            provided_token = auth_header[7:]  # Remove "Bearer "
+            if provided_token != wablas_api_key:
+                raise HTTPException(status_code=401, detail="Invalid API key")
+        else:
+            # Method 2: Signature-based auth
+            signature_header = request.headers.get("X-Wablas-Signature")
+            if not signature_header:
+                raise HTTPException(
+                    status_code=401,
+                    detail="Missing X-Wablas-Signature or Authorization header",
+                )
+            try:
+                verify_wablas_signature(signature_header, raw_body, wablas_api_key)
+            except SignatureError as e:
+                raise HTTPException(status_code=401, detail=f"Signature error: {e}")
 
     tenant_id = data.get("tenant_id", "default")
     wa_number = data.get("wa_number", "")
@@ -226,9 +268,9 @@ async def whatsapp_webhook(request: Request):
     except LLMError as e:
         logger.error("llm_error", exc_info=True)
         raise HTTPException(status_code=500, detail=f"LLM error: {e}")
-    except WablasError as e:
-        logger.error("wablas_error", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"WhatsApp error: {e}")
+    except (FonneteError, WablasError, PhoneGatewayException) as e:
+        logger.error("whatsapp_gateway_error", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"WhatsApp gateway error: {e}")
     except Exception as e:  # noqa: BLE001
         logger.error("unexpected_error", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal error")
@@ -239,7 +281,7 @@ async def health_check():
     _ensure_clients()
     return {
         "status": "healthy",
-        "clients_ready": all([_llm_client, _sheets_client, _wablas_client]),
+        "clients_ready": all([_llm_client, _sheets_client, _phone_gateway]),
         "graph_compiled": _compiled_graph is not None,
     }
 
@@ -248,10 +290,10 @@ async def health_check():
 @app.post("/debug/reset-graph/")
 async def debug_reset_graph():
     reset_compiled_graph_for_testing()
-    global _llm_client, _sheets_client, _wablas_client, _checkpointer, _compiled_graph
+    global _llm_client, _sheets_client, _phone_gateway, _checkpointer, _compiled_graph
     _llm_client = None
     _sheets_client = None
-    _wablas_client = None
+    _phone_gateway = None
     _checkpointer = None
     _compiled_graph = None
     return {"status": "graph reset"}

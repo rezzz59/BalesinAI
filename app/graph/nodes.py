@@ -118,16 +118,18 @@ def _compose_fallback_message(state: ChatState, reason: str) -> dict:
     }
 
 
-async def send_whatsapp(state: ChatState, wablas_client: Any) -> dict:
-    """Send reply_text to buyer via Wablas. Returns {} on success.
+async def send_whatsapp(state: ChatState, gateway_client: Any) -> dict:
+    """Send reply_text to buyer via WhatsApp gateway. Returns {} on success.
 
-    Returns {action: "error", response: <error>} if all retries fail.
-    Does NOT raise — caller must check return.
+    Uses duck typing: client must have send_message(phone, message) method.
+    Raises PhoneGatewayException if there's an error after retries.
+
+    Returns {action: "error"} on failure.
     """
-    from app.services.wablas import WablasError
+    from app.services.phone_gateway import PhoneGatewayException  # Local import to avoid circular deps
 
     try:
-        await wablas_client.send_message(
+        await gateway_client.send_message(
             phone=state["wa_number"],
             message=state["reply_text"],
         )
@@ -139,7 +141,7 @@ async def send_whatsapp(state: ChatState, wablas_client: Any) -> dict:
             },
         )
         return {}
-    except WablasError as e:
+    except PhoneGatewayException as e:
         logger.error(
             "whatsapp_send_failed",
             extra={
@@ -151,13 +153,16 @@ async def send_whatsapp(state: ChatState, wablas_client: Any) -> dict:
         return {"action": "error"}
 
 
-async def fallback_human(state: ChatState, wablas_client: Any) -> dict:
-    """Forward original message to owner via Wablas. Also sends buyer acknowledgement.
+async def fallback_human(state: ChatState, gateway_client: Any) -> dict:
+    """Forward original message to owner via WhatsApp gateway. Also sends buyer acknowledgement.
+
+    Uses duck typing: client must have send_message(phone, message) method.
+    Raises PhoneGatewayException if there's an error after retries.
 
     Caller MUST have already set fallback_reason before calling.
-    Returns {} on success, {action: "error"} if Wablas fails.
+    Returns {} on success, {action: "error"} on failure.
     """
-    from app.services.wablas import WablasError
+    from app.services.phone_gateway import PhoneGatewayException  # Local import to avoid circular deps
 
     # Need owner_wa_number — but it's not in ChatState. Read from tenant repo.
     from app.db.tenant_repo import get_tenant
@@ -179,12 +184,12 @@ async def fallback_human(state: ChatState, wablas_client: Any) -> dict:
 
     try:
         # 1. Send to owner
-        await wablas_client.send_message(
+        await gateway_client.send_message(
             phone=tenant["owner_wa_number"],
             message=owner_msg,
         )
         # 2. Send acknowledgement to buyer
-        await wablas_client.send_message(
+        await gateway_client.send_message(
             phone=state["wa_number"],
             message="Sedang kami cek, owner akan follow up ya 🙏",
         )
@@ -197,7 +202,7 @@ async def fallback_human(state: ChatState, wablas_client: Any) -> dict:
             },
         )
         return {}
-    except WablasError as e:
+    except PhoneGatewayException as e:
         logger.error("fallback_send_failed", extra={"error": str(e)})
         return {"action": "error"}
 
