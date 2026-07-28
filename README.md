@@ -111,25 +111,4 @@ app/
 ├── auth/                   # Auth middleware & signature verification
 └── db/                     # SQLite checkpointer for LangGraph persistence
 ```
-
-Design spec lengkap: [docs/2026-07-27-ordercloser-lite-fase1-design.md](docs/2026-07-27-ordercloser-lite-fase1-design.md)
-
-## File Penting
-
-| File | Deskripsi |
-|------|-----------|
-| `.env` | Environment variables (jangan committed!) |
-| `pyproject.toml` | Dependencies & dev config |
-| `scripts/gen_encryption_key.py` | Generate Fernet encryption key |
-| `scripts/seed_tenant.py` | Seed data tenant + catalog |
-| `scripts/test_fonnte_send.py` | Script manual kirim pesan uji |
-
-## Contributions
-
-- Report issue di GitHub
-- PR enhancements (misal tambah gateway lain, fix bug)
-- Tambahkan test coverage untuk feature baru
-
----
-
 🚀 Built on LangGraph + FastAPI + Google Gemini
