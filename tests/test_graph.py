@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from app.graph.graph import build_graph, should_fallback, route_after_classify
+from app.graph.graph import build_graph, should_fallback, route_after_classify, route_after_lookup
 from app.graph.nodes import compose_reply
 from app.graph.state import ChatState
 from app.services.llm import LLMClient, LLMError, LLMValidationError, MockLLMClient
@@ -79,6 +79,35 @@ def test_route_after_classify_returns_fallback_for_unclear():
         "confidence": 0.95,
     }
     assert route_after_classify(state) == "fallback_human"
+
+
+def test_route_after_lookup_skips_fallback_when_browse_reply_prebuilt():
+    """Catalog-browse path: lookup_catalog pre-built reply_text. Router must
+    route to compose_reply (which short-circuits to the prebuilt reply), not
+    to compose_reply_fallback. Regression: prior bug routed this to fallback."""
+    state: ChatState = {
+        "tenant_id": "demo",
+        "wa_number": "+628999",
+        "thread_id": "demo:+628999",
+        "message_text": "ada produk apa aja kak?",
+        "intent": "check_product",
+        "reply_text": "Ini lineup yang ready ya kak 😊",
+        "product_match": None,
+    }
+    assert route_after_lookup(state) == "compose_reply"
+
+
+def test_route_after_lookup_routes_to_fallback_for_check_product_without_match_and_no_reply():
+    """No keyword match + no prebuilt reply → fallback (no data)."""
+    state: ChatState = {
+        "tenant_id": "demo",
+        "wa_number": "+628999",
+        "thread_id": "demo:+628999",
+        "message_text": "apa produk baru?",
+        "intent": "check_product",
+        "product_match": None,
+    }
+    assert route_after_lookup(state) == "compose_reply_fallback"
 
 
 # ---------------------------------------------------------------------------
@@ -224,6 +253,34 @@ def test_compose_reply_skips_llm_for_confirm_order():
     assert llm.called is False
     assert update["action"] == "order"
     assert "Owner akan follow up" in update["reply_text"]
+
+
+def test_compose_reply_skips_llm_for_browse_mode():
+    """If lookup_catalog pre-built a reply (catalog-browse), compose_reply
+    returns it verbatim — never calls LLM (no hallucination on multi-row)."""
+    state = _base_high_state()
+    state["intent"] = "check_product"
+    state["match_kind"] = "none"
+    prebuilt = "Ini lineup yang ready ya kak 😊\n\n1. Hoodie - Rp 150.000\n2. Kaos - Rp 50.000\n\nMau yang mana kak? 😊"
+    state["reply_text"] = prebuilt
+    state["action"] = "reply"
+
+    class SpyLLM(LLMClient):
+        def __init__(self):
+            self.called = False
+
+        def classify(self, message):
+            return {"intent": "check_product", "confidence": 0.9}
+
+        def compose_reply(self, message, retrieved_row, match_kind):
+            self.called = True
+            return "should not be used"
+
+    llm = SpyLLM()
+    update = compose_reply(state, llm_client=llm)
+    assert llm.called is False
+    assert update["reply_text"] == prebuilt
+    assert update["action"] == "reply"
 
 
 def test_compose_reply_fallback_when_no_data_anywhere():

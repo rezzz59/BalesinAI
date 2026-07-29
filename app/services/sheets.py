@@ -75,6 +75,13 @@ class GoogleSheetsClient:
     def read_catalog(self) -> list[dict[str, str]]:
         return self._read_tab("Katalog")
 
+    def list_ready_products(self) -> list[dict[str, str]]:
+        """Return catalog rows where ready == 'Y' (case-insensitive)."""
+        return [
+            r for r in self.read_catalog()
+            if (r.get("ready") or "").strip().upper() == "Y"
+        ]
+
     def lookup_faq(self, message: str) -> dict[str, str] | None:
         """Simple keyword lookup. Returns first row whose 'pertanyaan' contains message keywords."""
         message_lower = message.lower()

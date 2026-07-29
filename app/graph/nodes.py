@@ -61,6 +61,26 @@ def lookup_catalog(state: ChatState, sheets_client: Any) -> dict:
                         "catalog_answer": None,
                         "product_match": product,
                     }
+            # No specific product keyword matched — treat as a catalog-browse
+            # request. List all ready products as a deterministic template reply
+            # so we never invent details via LLM. If nothing is ready, fall
+            # through to fallback (empty dict) so the owner gets notified.
+            ready = sheets_client.list_ready_products()
+            if ready:
+                logger.info(
+                    "catalog_browse_listed",
+                    extra={
+                        "tenant_id": state["tenant_id"],
+                        "thread_id": state["thread_id"],
+                        "count": len(ready),
+                    },
+                )
+                return {
+                    "reply_text": _format_browse_reply(ready),
+                    "action": "reply",
+                    "product_match": None,
+                    "catalog_answer": None,
+                }
             return {}
 
         return {}
@@ -91,6 +111,12 @@ def _compose_with_llm(state: ChatState, llm_client: Any) -> dict:
       5. After 2 validation failures: fall back to verbatim-xlsx reply.
       6. Verbatim fallback returns the human-handoff message when there's no data.
     """
+    # Short-circuit: if an upstream node already built the reply (e.g. catalog
+    # browse list from lookup_catalog), return it verbatim — no LLM round-trip,
+    # no risk of hallucination on multi-row output.
+    if state.get("reply_text") and state.get("action") == "reply":
+        return {"reply_text": state["reply_text"], "action": "reply"}
+
     intent = state["intent"]
     match_kind = state.get("match_kind") or "none"
 
@@ -194,6 +220,66 @@ def _compose_fallback_message(state: ChatState, reason: str) -> dict:
         "action": "fallback",
         "fallback_reason": reason,
     }
+
+
+def _format_browse_reply(products: list[dict]) -> str:
+    """Format a ready-product list for a buyer 'ada produk apa aja?' query.
+
+    Catalog has many ready variants — listing all of them would explode the
+    WhatsApp message. Group by product family, show a representative item
+    per family plus variant count and price range, and offer to share more.
+
+    Output format (deterministic, no LLM):
+      opener
+        family 1 — X varian ready (contoh: <name> Rp<min>-Rp<max>)
+        family 2 — ...
+      closing
+    """
+    families: dict[str, list[dict]] = {}
+    for p in products:
+        nama = (p.get("nama_produk") or "").strip()
+        family = _extract_family(nama)
+        families.setdefault(family, []).append(p)
+
+    lines = ["Ini lineup yang ready ya kak 😊", ""]
+    for family in sorted(families):
+        variants = families[family]
+        prices = [int(v.get("harga")) for v in variants if str(v.get("harga", "")).isdigit()]
+        sample = variants[0].get("nama_produk", "-")
+        if prices:
+            lo, hi = min(prices), max(prices)
+            price_range = f"Rp{lo:,}" if lo == hi else f"Rp{lo:,}-Rp{hi:,}"
+        else:
+            price_range = "Harga cek via owner"
+        lines.append(
+            f"- {family}: {len(variants)} varian ready "
+            f"(contoh: {sample}, {price_range})"
+        )
+    total = len(products)
+    lines.append("")
+    lines.append(
+        f"Total ada {total} varian ready kak. Mau lihat per-varian warna/ukuran? "
+        f"Atau langsung sebut aja nama produknya 😊"
+    )
+    return "\n".join(lines)
+
+
+def _extract_family(nama: str) -> str:
+    """Pull the product family from a full product name.
+
+    Example: 'Kaos Oversize Crop - Hitam - Size L' -> 'Kaos Oversize Crop'
+    Strategy: take leading words until we hit ' - ' or '-' alone, then strip
+    trailing size/colour tokens. Falls back to first 3 words.
+    """
+    if not nama:
+        return "Lainnya"
+    head = nama.split(" - ")[0].strip()
+    # Drop trailing size tokens like 'Size L', 'Size XXL'.
+    for token in head.split():
+        if token.lower().startswith("size"):
+            head = head.split(token)[0].strip()
+            break
+    return head or " ".join(nama.split()[:3])
 
 
 async def send_whatsapp(state: ChatState, gateway_client: Any) -> dict:

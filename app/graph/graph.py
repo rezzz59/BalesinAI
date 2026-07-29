@@ -63,7 +63,7 @@ def route_after_lookup(state: ChatState) -> str:
     intent = state.get("intent")
     if intent == "faq" and not state.get("catalog_answer"):
         return "compose_reply_fallback"
-    if intent == "check_product" and not state.get("product_match"):
+    if intent == "check_product" and not state.get("product_match") and not state.get("reply_text"):
         return "compose_reply_fallback"
     return "compose_reply"
 
