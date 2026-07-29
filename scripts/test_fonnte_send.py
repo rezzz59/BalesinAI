@@ -23,12 +23,11 @@ def main():
     # Load environment variables
     load_dotenv()
 
-    # Check if FONTTE_API_KEY is set (double 'N' to match config.py)
-    api_key = os.getenv("FONTTE_API_KEY")
+    api_key = os.getenv("FONNTE_API_KEY")
     if not api_key or api_key == "isi_di_sini_mandiri" or api_key == "YOUR_FONTE_API_KEY":
-        print("❌ ERROR: FONTTE_API_KEY is not properly configured!")
+        print("❌ ERROR: FONNTE_API_KEY is not properly configured!")
         print("   Please edit .env file and set:")
-        print("   FONTTE_API_KEY=your_actual_api_key_here")
+        print("   FONNTE_API_KEY=your_actual_api_key_here")
         sys.exit(1)
 
     print("✓ FONTE_API_KEY configured successfully")

@@ -39,11 +39,8 @@ nano .env
 
 ```env
 # Menggunakan Fonnte
-WHATAPP_GATEWAY=fonnte
-FONTTE_API_KEY=<your_fonnte_api_key>
+FONNTE_API_KEY=<your_fonnte_api_key>
 ```
-
-> 💡 Tip: API key Fonnte masuk sesuai field `FONTTE_API_KEY` (huruf N ganda).
 
 ### 3. Generate Kunci Enkripsi & Seed Tenant
 
@@ -84,7 +81,7 @@ Coverage: 80%+ (termasuk FonnteGateway dengan 8 test cases).
 ### Kirim Pesan Uji Manual
 
 ```bash
-# Via Fonnte gateway (pastikan WHATSAPP_GATEWAY=fonnte)
+# Via Fonnte gateway
 python scripts/test_fonnte_send.py
 ```
 
