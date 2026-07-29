@@ -2,6 +2,7 @@
 import abc
 import json
 import logging
+import re
 from typing import Any, TypeAlias
 
 from app.graph.prompts import INTENT_CLASSIFICATION_SYSTEM, INTENT_CLASSIFICATION_USER
@@ -200,4 +201,80 @@ __all__ = [
     "AnthropicLLMClient",
     "GeminiLLMClient",
     "get_llm_client",
+    "LLMValidationError",
+    "validate_reply",
 ]
+
+
+class LLMValidationError(Exception):
+    """Raised when LLM-composed reply contains facts not in source row."""
+
+
+def validate_reply(reply: str, source_row: dict | str | None) -> None:
+    """Enforce no-hallucination rule on a composed reply.
+
+    Raises LLMValidationError if reply contains numbers, sizes, or stock
+    indicators not present in source_row.
+
+    Args:
+      reply: the composed reply text from the LLM.
+      source_row: matched FAQ or product row as dict, or stringified row,
+                  or None when no row matched (validation is a no-op then).
+    """
+    if source_row is None:
+        return
+
+    # Extract source text — either from a dict's stringified values, or a raw string.
+    if isinstance(source_row, dict):
+        source_text = " ".join(str(v) for v in source_row.values() if v is not None)
+    elif isinstance(source_row, str):
+        source_text = source_row
+    else:
+        return
+
+    # 1. Numeric tokens — must all appear in source.
+    reply_nums = set(re.findall(r"\d+(?:\.\d+)?", reply))
+    source_nums = set(re.findall(r"\d+(?:\.\d+)?", source_text))
+    invented_nums = reply_nums - source_nums
+    if invented_nums:
+        raise LLMValidationError(
+            f"Reply contains numbers not in source: {sorted(invented_nums)}"
+        )
+
+    # 2. Sizes — S, M, L, XL, XXL, XXXL.
+    size_pattern = r"\b(?:XXXL|XXL|XL|L|M|S)\b"
+    reply_sizes = set(re.findall(size_pattern, reply))
+    source_sizes = set(re.findall(size_pattern, source_text))
+    # Only enforce if source actually mentions sizes (otherwise L may be common word).
+    if source_sizes and (reply_sizes - source_sizes):
+        raise LLMValidationError(
+            f"Reply contains sizes not in source: {sorted(reply_sizes - source_sizes)}"
+        )
+
+    # 3. Stock indicators — ready / habis / Y / N.
+    stock_pattern = r"\b(?:ready|habis)\b"
+    reply_stock = set(re.findall(stock_pattern, reply, flags=re.IGNORECASE))
+    source_stock = set(re.findall(stock_pattern, source_text, flags=re.IGNORECASE))
+    if source_stock and (reply_stock - source_stock):
+        raise LLMValidationError(
+            f"Reply contains stock status not in source: {sorted(reply_stock - source_stock)}"
+        )
+
+    # 4. Strict price-format check — the reply must contain the source price verbatim
+    #    if it mentions a price. Look for "Rp" anywhere in reply and ensure
+    #    a matching "Rp <digits>" pattern from source appears character-for-character.
+    reply_prices = re.findall(r"Rp\s*[\d.,]+", reply)
+    if reply_prices:
+        # Normalize: any Rp <num> in reply must match at least one Rp <num> in source.
+        source_prices = re.findall(r"Rp\s*[\d.,]+", source_text)
+        if not source_prices:
+            raise LLMValidationError(
+                f"Reply mentions price but source has no price: {reply_prices}"
+            )
+        for rp in reply_prices:
+            # Normalize whitespace and check substring match against each source price.
+            rp_norm = re.sub(r"\s+", " ", rp).strip()
+            if not any(rp_norm == re.sub(r"\s+", " ", sp).strip() for sp in source_prices):
+                raise LLMValidationError(
+                    f"Reply price '{rp}' does not exactly match any source price"
+                )
