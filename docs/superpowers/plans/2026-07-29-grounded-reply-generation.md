@@ -1041,10 +1041,19 @@ def _compose_with_llm(state: ChatState, llm_client: Any) -> dict:
         }
 
     # Try LLM up to 2 times (initial + 1 retry).
+    message = state["message_text"]
     for attempt in range(2):
         try:
+            # On retry, append a stricter hint to the message so the LLM
+            # sees a fresh instruction that previous answer was invalid.
+            message_for_call = (
+                message if attempt == 0
+                else f"{message}\n\n[Strict hint: your previous reply contained facts "
+                "not in our catalog. Restrict your reply to ONLY facts from the source row above. "
+                "Do not invent prices, sizes, colors, or stock status.]"
+            )
             reply = llm_client.compose_reply(
-                message=state["message_text"],
+                message=message_for_call,
                 retrieved_row=retrieved_row,
                 match_kind=match_kind,
             )
@@ -1055,10 +1064,6 @@ def _compose_with_llm(state: ChatState, llm_client: Any) -> dict:
                 "compose_validation_failed",
                 extra={"tenant_id": state["tenant_id"], "attempt": attempt, "error": str(e)},
             )
-            # Retry: next attempt will see the same compose_reply call, but
-            # we mutate the input to inject a stricter hint.
-            state = {**state, "_retry_hint": "Reply contained facts not in source. Re-state using ONLY source."}
-            retrieved_row = retrieved_row  # keep same; retry logic is client-side
             continue
         except LLMError as e:
             logger.error(
