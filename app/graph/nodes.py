@@ -4,8 +4,23 @@ from typing import Any
 
 from app.graph.state import ChatState
 from app.services.llm import LLMError, LLMValidationError, validate_reply
+from app.services.sheets import FAQ_MATCH_THRESHOLD, _score_faq_row
 
 logger = logging.getLogger(__name__)
+
+
+def _to_match_kind(score: float) -> str:
+    """Bucket an overlap score into high/medium/none for downstream grading.
+
+    Uses thresholds (0.5 high, otherwise >0 medium) so a 1/2 overlap (0.5)
+    counts as a high-confidence FAQ match �� appropriate when the buyer asks a
+    short, specific question.
+    """
+    if score >= 0.5:
+        return "high"
+    if score > 0.0:
+        return "medium"
+    return "none"
 
 
 def classify_intent(state: ChatState, llm_client: Any) -> dict:
@@ -33,9 +48,11 @@ def classify_intent(state: ChatState, llm_client: Any) -> dict:
 def lookup_catalog(state: ChatState, sheets_client: Any) -> dict:
     """Lookup answer in Sheets based on intent.
 
-    For intent=faq: call sheets_client.lookup_faq()
-    For intent=check_product: call sheets_client.read_catalog() and do simple keyword match
-    Returns dict update: {catalog_answer, product_match} or empty dict if no match.
+    For intent=faq: call sheets_client.lookup_faq() and grade the match.
+    For intent=check_product: call sheets_client.read_catalog() and pick the
+        best-scoring product above FAQ_MATCH_THRESHOLD.
+    Returns dict update: {catalog_answer, product_match, match_kind} or empty
+    dict if no match.
     """
     intent = state["intent"]
 
@@ -48,19 +65,38 @@ def lookup_catalog(state: ChatState, sheets_client: Any) -> dict:
                     extra={"tenant_id": state["tenant_id"], "thread_id": state["thread_id"]},
                 )
                 return {}
-            return {"catalog_answer": match["jawaban"], "product_match": None}
+            # Re-score the winning row so we can grade match_kind for downstream
+            # validation. _score_faq_row is O(1) for a single row (tokenize +
+            # set intersection), negligible overhead vs the lookup's full scan.
+            score = _score_faq_row(state["message_text"], match)
+            return {
+                "catalog_answer": match["jawaban"],
+                "product_match": None,
+                "match_kind": _to_match_kind(score),
+            }
 
         if intent == "check_product":
             products = sheets_client.read_catalog()
-            message_lower = state["message_text"].lower()
-            words = [w for w in message_lower.split() if len(w) >= 3]
+            message = state["message_text"]
+            best_product: dict | None = None
+            best_score = 0.0
             for product in products:
-                nama = (product.get("nama_produk") or "").lower()
-                if any(w in nama for w in words):
-                    return {
-                        "catalog_answer": None,
-                        "product_match": product,
-                    }
+                # Combine nama_produk + deskripsi for matching; numeric/ready
+                # columns add noise to scoring.
+                combined = " ".join(
+                    str(product.get(k) or "")
+                    for k in ("nama_produk", "deskripsi")
+                )
+                score = _score_faq_row(message, {"text": combined})
+                if score > best_score:
+                    best_score = score
+                    best_product = product
+            if best_product is not None and best_score >= FAQ_MATCH_THRESHOLD:
+                return {
+                    "catalog_answer": None,
+                    "product_match": best_product,
+                    "match_kind": _to_match_kind(best_score),
+                }
             # No specific product keyword matched — treat as a catalog-browse
             # request. List all ready products as a deterministic template reply
             # so we never invent details via LLM. If nothing is ready, fall
@@ -80,6 +116,7 @@ def lookup_catalog(state: ChatState, sheets_client: Any) -> dict:
                     "action": "reply",
                     "product_match": None,
                     "catalog_answer": None,
+                    "match_kind": "none",
                 }
             return {}
 

@@ -115,3 +115,55 @@ def test_lookup_product_no_keyword_match_no_ready_returns_empty():
 
     result = lookup_catalog(state, sheets_client=fake_sheets)
     assert result == {}
+
+
+def test_lookup_faq_sets_match_kind_on_strong_match():
+    """A short query with strong overlap must yield match_kind='high'."""
+    state: ChatState = {
+        "tenant_id": "demo",
+        "wa_number": "+628999",
+        "thread_id": "demo:+628999",
+        "message_text": "tukar size",
+        "intent": "faq",
+    }
+
+    fake_sheets = MagicMock()
+    fake_sheets.lookup_faq = MagicMock(
+        return_value={
+            "pertanyaan": "Bisa retur kalau salah ukuran?",
+            "jawaban": "Bisa tukar size",
+        }
+    )
+
+    result = lookup_catalog(state, sheets_client=fake_sheets)
+
+    assert result["match_kind"] in ("high", "medium")
+    # 2/2 = 1.0 → "high"
+    assert result["match_kind"] == "high"
+
+
+def test_lookup_product_picks_best_match_with_stopwords():
+    """Branch check_product must use the same scoring + stopword filtering."""
+    state: ChatState = {
+        "tenant_id": "demo",
+        "wa_number": "+628999",
+        "thread_id": "demo:+628999",
+        "message_text": "kalau ada hoodie fleece ready ga kak?",
+        "intent": "check_product",
+    }
+
+    fake_sheets = MagicMock()
+    fake_sheets.read_catalog = MagicMock(
+        return_value=[
+            {"nama_produk": "Kaos Polos", "harga": "50000", "ready": "Y", "deskripsi": "Standar"},
+            {"nama_produk": "Hoodie Fleece Tebal", "harga": "150000", "ready": "Y",
+             "deskripsi": "Bahan hangat untuk udara dingin"},
+        ]
+    )
+
+    result = lookup_catalog(state, sheets_client=fake_sheets)
+
+    assert result["product_match"] is not None
+    assert "Hoodie" in result["product_match"]["nama_produk"]
+    # 'hoodie' and 'fleece' both match → high
+    assert result["match_kind"] in ("high", "medium")
