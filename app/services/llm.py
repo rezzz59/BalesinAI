@@ -28,6 +28,19 @@ class LLMClient(metaclass=abc.ABCMeta):
         """
         pass
 
+    @abc.abstractmethod
+    def compose_reply(self, message: str, retrieved_row: dict | None, match_kind: str) -> str:
+        """Compose natural Indonesian reply grounded in retrieved_row (if any).
+
+        Args:
+          message: the buyer's WhatsApp message.
+          retrieved_row: matched FAQ or product row, or None.
+          match_kind: 'high' | 'medium' | 'none'.
+
+        Returns the composed reply text. May raise LLMError.
+        """
+        pass
+
 
 class MockLLMClient(LLMClient):
     """Deterministic classifier for local dev / testing / when SDK missing.
@@ -44,6 +57,11 @@ class MockLLMClient(LLMClient):
         if any(kw in msg for kw in ("?", "apa", "bagaimana", "kapan", "dimana", "gimana")):
             return {"intent": "faq", "confidence": 0.8}
         return {"intent": "unclear", "confidence": 0.4}
+
+    def compose_reply(self, message: str, retrieved_row: dict | None, match_kind: str) -> str:
+        if retrieved_row:
+            return str(retrieved_row.get("name") or retrieved_row.get("nama_produk") or "produk")
+        return "Mohon maaf, produk belum tersedia."
 
 
 # Attempt to import Anthropic SDK; optional - required only if using Anthropic backend
