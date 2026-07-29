@@ -94,8 +94,12 @@ def _fallback_sync(state, gateway_client):
     return {}
 
 
-async def _compose_fallback_node(state):
-    """Compose fallback message (called when lookup returns nothing)."""
+def _compose_fallback_node(state):
+    """Compose fallback message (called when lookup returns nothing).
+
+    Sync to match the rest of the graph — langgraph's invoke() rejects async
+    nodes unless every node is async.
+    """
     return {
         "reply_text": "Sedang kami cek, owner akan follow up ya 🙏",
         "action": "fallback",

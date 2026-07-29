@@ -355,3 +355,56 @@ def test_built_graph_runs_end_to_end_with_llm_client():
     assert llm.compose_calls >= 1, "compose_reply was not called via graph wiring"
     assert isinstance(result.get("reply_text"), str)
     assert result.get("action") in ("reply", "fallback", "order")
+
+
+def test_built_graph_handles_no_faq_match_via_sync_invoke():
+    """Sync invoke must work on the no-match path (compose_reply_fallback -> fallback_human).
+
+    Regression: _compose_fallback_node was `async def`, which broke graph.invoke()
+    on the no-match path because every other node is sync.
+    """
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    class FakeSheets:
+        def lookup_faq(self, msg):
+            return None  # no match
+
+        def read_catalog(self):
+            return []
+
+    class FakeGateway:
+        def __init__(self):
+            self.sent = []
+
+        async def send_message(self, *args, **kwargs):
+            self.sent.append((args, kwargs))
+            return {"ok": True}
+
+    fake_tenant = {
+        "tenant_id": "demo",
+        "wa_api_key_encrypted": b"\x00" * 32,
+        "google_sheet_id": "sheet-abc",
+        "payment_provider": "xendit",
+        "owner_wa_number": "+628111111",
+    }
+    fake_repo = MagicMock(return_value=fake_tenant)
+
+    llm = MockLLMClient()
+    gateway = FakeGateway()
+    graph = build_graph(llm_client=llm, sheets_client=FakeSheets(), gateway_client=gateway)
+
+    state = {
+        "tenant_id": "demo",
+        "wa_number": "+628999",
+        "thread_id": "demo:+628999",
+        "message_text": "apa ini laundry?",  # "apa" → faq; FakeSheets returns None → no match
+    }
+
+    with patch("app.db.tenant_repo.get_tenant", fake_repo):
+        result = graph.invoke(state)
+
+    # No-match path should route via compose_reply_fallback -> fallback_human.
+    assert result.get("fallback_reason") in ("no_faq_match", "no_match"), result
+    assert result.get("action") == "fallback"
+    # Owner should receive a fallback alert and buyer a polite ack.
+    assert len(gateway.sent) == 2
