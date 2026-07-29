@@ -6,7 +6,7 @@ Fitur utama:
 - **Classifikasi intent** menggunakan Gemini API (Google GenAI)
 - **Auto-reply dinamis** lookup catalog dari Google Sheets
 - **Fallback ke owner** otomatis saat tidak bisa bantu
-- **Support multi-gateway**: Wablas atau Fonnte WhatsApp gateway
+- **Support WhatsApp gateway**: Fonnte WhatsApp gateway
 
 ## Quick Start
 
@@ -35,20 +35,15 @@ nano .env
 | `ENCRYPTION_KEY` | Kunci Fernet untuk enkripsi data (generate via `python scripts/gen_encryption_key.py`) |
 | `GOOGLE_SHEETS_CREDENTIALS_JSON_PATH` | Path ke service account JSON |
 
-**WhatsApp Gateway (pilih salah satu):**
+**WhatsApp Gateway (Fonnte):**
 
 ```env
-# Option A: Menggunakan Wablas (default)
-WHATAPP_GATEWAY=wablas
-WABLAS_BASE_URL=https://api.wablas.example
-WABLAS_API_KEY=<your_wablas_key>
-
-# Option B: Menggunakan Fonnte (recommended)
+# Menggunakan Fonnte
 WHATAPP_GATEWAY=fonnte
 FONTTE_API_KEY=<your_fonnte_api_key>
 ```
 
-> 💡 Tip: Ganti `WHATAPP_GATEWAY` di `.env` untuk ganti gateway. API key Fonnte masuk sesuai field `FONTTE_API_KEY` (huruf N ganda).
+> 💡 Tip: API key Fonnte masuk sesuai field `FONTTE_API_KEY` (huruf N ganda).
 
 ### 3. Generate Kunci Enkripsi & Seed Tenant
 
@@ -58,7 +53,7 @@ python scripts/seed_tenant.py \
     --tenant demo \
     --sheet-id YOUR_GOOGLE_SHEET_ID \
     --wa-number +628XXXXXXXXX \
-    --api-key <wablas_fonnte_key>
+    --api-key <fonnte_api_key>
 ```
 
 ### 4. Jalankan Server
@@ -106,8 +101,7 @@ app/
 │   ├── llm.py              # Gemini/Anthropic LLM client
 │   ├── sheets.py           # Google Sheets client
 │   ├── phone_gateway.py    # Abstract base (PhoneGateway, PhoneGatewayException)
-│   ├── fonnte.py           # FonnteGateway implementation (retry, HTTP POST)
-│   └── wablas.py           # WablasClient implementation (HMAC signature)
+│   └── fonnte.py           # FonnteGateway implementation (retry, HTTP POST, Bearer auth)
 ├── auth/                   # Auth middleware & signature verification
 └── db/                     # SQLite checkpointer for LangGraph persistence
 ```
