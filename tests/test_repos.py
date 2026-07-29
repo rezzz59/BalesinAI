@@ -24,7 +24,7 @@ def test_tenant_repo_insert_and_get():
     from app.services.crypto import encrypt_api_key
 
     settings = get_settings()
-    encrypted = encrypt_api_key("wablas-key-xyz", settings.encryption_key)
+    encrypted = encrypt_api_key("fonnte-token-xyz", settings.encryption_key)
 
     insert_tenant(
         tenant_id="demo",
@@ -39,7 +39,7 @@ def test_tenant_repo_insert_and_get():
     assert tenant["google_sheet_id"] == "sheet-abc"
     assert (
         decrypt_api_key(tenant["wa_api_key_encrypted"], settings.encryption_key)  # noqa: F821
-        == "wablas-key-xyz"
+        == "fonnte-token-xyz"
     )
 
 
