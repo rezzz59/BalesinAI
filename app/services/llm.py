@@ -5,7 +5,14 @@ import logging
 import re
 from typing import Any, TypeAlias
 
-from app.graph.prompts import INTENT_CLASSIFICATION_SYSTEM, INTENT_CLASSIFICATION_USER
+from app.graph.prompts import (
+    COMPOSE_NOMATCH_SYSTEM,
+    COMPOSE_PARTIAL_SYSTEM,
+    COMPOSE_STRICT_SYSTEM,
+    COMPOSE_USER_TEMPLATE,
+    INTENT_CLASSIFICATION_SYSTEM,
+    INTENT_CLASSIFICATION_USER,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -118,6 +125,50 @@ class AnthropicLLMClient(LLMClient):
         except json.JSONDecodeError as e:
             raise LLMError(f"Invalid JSON from LLM: {e}") from e
 
+    def compose_reply(
+        self,
+        message: str,
+        retrieved_row: dict | None,
+        match_kind: str,
+    ) -> str:
+        """See base class. Anthropic implementation."""
+        if match_kind == "none":
+            system = COMPOSE_NOMATCH_SYSTEM
+        elif match_kind == "medium":
+            system = COMPOSE_PARTIAL_SYSTEM
+        else:
+            system = COMPOSE_STRICT_SYSTEM
+
+        if retrieved_row:
+            source_str = " | ".join(
+                f"{k}: {v}" for k, v in retrieved_row.items() if v is not None
+            )
+        else:
+            source_str = "(tidak ada data yang cocok di katalog)"
+
+        user = COMPOSE_USER_TEMPLATE.format(
+            message=message,
+            source_row=source_str,
+            match_kind=match_kind,
+        )
+
+        try:
+            response = self._client.messages.create(
+                model=self.MODEL,
+                max_tokens=512,
+                system=system,
+                messages=[{"role": "user", "content": user}],
+            )
+            text_block = next(
+                (b for b in response.content if b.type == "text"),
+                None,
+            )
+            if text_block is None:
+                raise LLMError("No text block in compose response")
+            return text_block.text.strip()
+        except Exception as e:  # noqa: BLE001
+            raise LLMError(f"Anthropic compose failed: {e}") from e
+
 
 class GeminiLLMClient(LLMClient):
     """Wraps the new google-genai SDK for Gemini intent classification.
@@ -183,6 +234,51 @@ class GeminiLLMClient(LLMClient):
         except Exception as e:  # noqa: BLE001
             logger.exception("gemini_call_failed: %s", e)
             raise LLMError(f"Gemini API error: {e}") from e
+
+    def compose_reply(
+        self,
+        message: str,
+        retrieved_row: dict | None,
+        match_kind: str,
+    ) -> str:
+        """See base class. Gemini implementation."""
+        if match_kind == "none":
+            system = COMPOSE_NOMATCH_SYSTEM
+        elif match_kind == "medium":
+            system = COMPOSE_PARTIAL_SYSTEM
+        else:
+            system = COMPOSE_STRICT_SYSTEM
+
+        if retrieved_row:
+            source_str = " | ".join(
+                f"{k}: {v}" for k, v in retrieved_row.items() if v is not None
+            )
+        else:
+            source_str = "(tidak ada data yang cocok di katalog)"
+
+        user = COMPOSE_USER_TEMPLATE.format(
+            message=message,
+            source_row=source_str,
+            match_kind=match_kind,
+        )
+
+        try:
+            from google.genai import types as genai_types
+
+            response = self._client.models.generate_content(
+                model=self.MODEL,
+                contents=[system + "\n\n" + user],
+                config=genai_types.GenerateContentConfig(
+                    temperature=0.4,
+                    max_output_tokens=512,
+                ),
+            )
+            text = (response.text or "").strip()
+            if not text:
+                raise LLMError("Empty compose response from Gemini")
+            return text
+        except Exception as e:  # noqa: BLE001
+            raise LLMError(f"Gemini compose failed: {e}") from e
 
 
 def get_llm_client() -> LLMClient:
