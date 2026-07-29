@@ -21,14 +21,9 @@ class Settings(BaseSettings):
 
     # Required (must be provided via environment)
     encryption_key: str = ""
-    wablas_base_url: str = "https://api.wablas.example"
-    whatsapp_gateway: str = "wablas"  # "wablas" or "fonnte"
-    fonnte_api_key: str = ""  # API key for Fonnete when using fonnette gateway
+    fonnte_api_key: str = ""  # API key for Fonnte WhatsApp Gateway
     google_sheets_credentials_json_path: str = "./secrets/sheets-sa.json"
     google_sheets_spreadsheet_id: str = ""  # filled from tenant context or env
-
-    # Default Wablas API key (fallback, used if gateway = wablas)
-    wablas_api_key: str = ""
 
     # Optional with defaults
     checkpointer_db_path: str = "./data/checkpoints.db"
