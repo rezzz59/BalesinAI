@@ -21,6 +21,7 @@ class ChatState(TypedDict, total=False):
     # Lookup output
     catalog_answer: str | None
     product_match: dict | None
+    match_kind: str | None  # "high" | "medium" | "none" — set by lookup_catalog
 
     # Compose output
     reply_text: str

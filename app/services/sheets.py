@@ -1,6 +1,7 @@
 """Google Sheets client adapter — reads FAQ & Katalog tabs."""
 import logging
 import os
+import re
 import time
 from threading import Lock
 from typing import Any
@@ -91,3 +92,37 @@ class GoogleSheetsClient:
         """Test helper: clear the cache."""
         with self._lock:
             self._cache.clear()
+
+
+def score_match_kind(message: str, row: dict | None) -> str:
+    """Score the match between a buyer message and a catalog row.
+
+    Args:
+      message: buyer's WhatsApp message.
+      row: matched FAQ/product row as dict, or None.
+
+    Returns:
+      'high' if >=50% of message words (>=3 chars) appear in row.
+      'medium' if 1-49% appear.
+      'none' if no row, no overlap, or all words are too short to measure.
+    """
+    if row is None:
+        return "none"
+
+    # Build source text from all string fields of the row.
+    source_text = " ".join(str(v) for v in row.values() if v is not None).lower()
+
+    # Tokenize message - words >=3 chars, lowercased.
+    msg_words = [w for w in re.findall(r"\w+", (message or "").lower()) if len(w) >= 3]
+    if not msg_words:
+        return "none"
+
+    # Count how many message words appear in source text.
+    overlap = sum(1 for w in msg_words if w in source_text)
+    ratio = overlap / len(msg_words)
+
+    if ratio >= 0.5:
+        return "high"
+    if overlap > 0:
+        return "medium"
+    return "none"
