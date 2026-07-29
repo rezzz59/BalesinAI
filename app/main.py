@@ -268,7 +268,7 @@ async def whatsapp_webhook(request: Request):
     except LLMError as e:
         logger.error("llm_error", exc_info=True)
         raise HTTPException(status_code=500, detail=f"LLM error: {e}")
-    except (FonneteError, WablasError, PhoneGatewayException) as e:
+    except (FonnteError, WablasError, PhoneGatewayException) as e:
         logger.error("whatsapp_gateway_error", exc_info=True)
         raise HTTPException(status_code=500, detail=f"WhatsApp gateway error: {e}")
     except Exception as e:  # noqa: BLE001

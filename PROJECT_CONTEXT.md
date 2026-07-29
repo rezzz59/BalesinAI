@@ -110,27 +110,38 @@ LOG_LEVEL=INFO
 
 ---
 
-## Current Status (as of commit b0f63b3)
+## Current Status (verified 2026-07-29)
 
-✅ **Working:**
+✅ **Working — end-to-end verified on localhost:**
 - FastAPI server starts on port 8000
 - `/docs` Swagger UI accessible
-- `.env` key loaded successfully
-- LLM classification works (Gemini SDK optional — MockLLMClient fallback available)
-- Full graph flow end-to-end working (with fallback for missing Sheets/Wablas)
+- `.env` keys loaded successfully
+- LLM classification works with Gemini (`gemini-3.1-flash-lite`)
+- Full graph flow end-to-end working via **Fonnte gateway** (tested: classify → lookup → compose → send)
 - Logger bug fixed in `llm.py` (extra kwarg must be dict, not string)
-- Model switched to `gemini-3.1-flash-lite` (stable quota)
-- Webhook authentication (Bearer token & HMAC signature) works correctly
+- Google Sheets lookup verified working (both FAQ and Catalog tabs read correctly)
+- Webhook authentication (BBearer token for Fonnte) works correctly
 - Input validation at webhook endpoint rejects missing fields
-- Sheets errors caught gracefully — fallback to no-match path
-- `/health` endpoint returns dependency readiness status
-- Integration tests for webhook auth (tests/test_webhook.py) added
+- Sheets lookup error handling: fallback to no-match path
+- `/health` endpoint returns dependency readiness status (all dependencies ready)
+- Integration tests exist (14+ test files covering auth, sheets, llm, graph, etc.)
+- **Tested 2026-07-29**: Full WhatsApp round-trip via curl + local API call succeeded
+- Agent workflow diagram generated (`docs/diagrams/workflow.png/svg`)
 
-⏳ **Pending/Needs Setup:**
-- Wablas API key required for actual WhatsApp sending/receiving
-- Google Sheets service account key (`secrets/sheets-sa.json`) for lookup
-- SQLite checkpointer setup for persistent state across sessions
-- Encryption key generation for tenant data (if multi-tenant)
+⏳ **Remaining / Recommended:**
+- Rotate `FONNTE_API_KEY` in `.env` (this token appeared in chat — see security note below)
+- Set up ngrok + real device for full WhatsApp inbound testing
+- Add unit tests for the typo fix (`FonnteError` exception handling)
+- Update `README.md` with current setup guide (optional — already has good docs)
+- Consider migrating to Anthropic/Claude Haiku if Gemini quota becomes unstable (fallback exists)
+- Prepare Phase 2 spec (payment link generation, Order_Log tab) when MVP stable
+
+---
+
+### ⚠️ Security Note
+The `FONNTE_API_KEY` shown during this session should be rotated on your Fonnte dashboard after confirming MVP works. Regenerate it in https://fonnte.com and update `.env`.
+
+---
 
 ---
 
@@ -148,15 +159,26 @@ LOG_LEVEL=INFO
 
 ---
 
-## Next Steps
+## Known Issues & Fixes — Phase 1 Status
 
-1. Provision real Wablas API key and test full WhatsApp round-trip
-2. Set up Google Sheets service account JSON (`secrets/sheets-sa.json`) for live FAQ/catalog lookup
-3. Verify `checkpoints.db` SQLite file is created and persists conversation state
-4. Add more integration tests covering the full graph flow (intent → catalog → reply → log)
-5. When deploying to real host, switch auth default from Bearer token to HMAC signature (more secure)
-6. Replace `MockLLMClient` with real `GeminiLLMClient` once `google-genai` SDK is installed in production env
-7. Push `feat/fase1-mvp` branch to origin and open PR for review
+The following issues have been **resolved** during Phase 1 MVP development:
+
+| Issue | Resolution | Location | Date |
+|-------|-----------|----------|------|
+| Wablas endpoint `/api/v1/send-message` changed to `/api/send-message` | Updated in `wablas.py` | v2.1 | — |
+| Gemini free-tier quota exhausted | Switched to `gemini-3.1-flash-lite` | `llm.py:MODEL` | — |
+| Typo `FonneteError` → `FonnteError` in except clause | Fixed | `main.py:271` | 2026-07-29 |
+| MockLLMClient as fallback when `google-genai` not installed | Existing in code | `llm.py:_create_llm_client()` | — |
+
+---
+
+### ⚠️ Security Note — Rotate Tokens
+
+During this session, `FONNTE_API_KEY`, `GEMINI_API_KEY`, and `ENCRYPTION_KEY` values were visible in the chat. **Do not use these tokens in production**. After confirming MVP works, regenerate each on its provider dashboard and update your `.env`:
+
+1. **Fonnte**: https://fonnte.com → Generate new API key
+2. **Google Cloud Console**: Rotate Gemini API key if exposed
+3. **Generate fresh encryption key**: `python -c "import secrets; print(secrets.token_urlsafe(32))"`
 
 ---
 
