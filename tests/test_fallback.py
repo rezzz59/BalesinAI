@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from app.graph.nodes import fallback_human, compose_reply
 from app.graph.state import ChatState
 from app.services.fonnte import FonnteError
+from app.services.llm import MockLLMClient
 
 
 def test_compose_reply_faq_with_answer():
@@ -16,7 +17,7 @@ def test_compose_reply_faq_with_answer():
         "intent": "faq",
         "catalog_answer": "Mulai Rp 50.000",
     }
-    result = compose_reply(state)
+    result = compose_reply(state, llm_client=MockLLMClient())
     assert result["action"] == "reply"
     assert "Rp 50.000" in result["reply_text"]
 
@@ -29,9 +30,19 @@ def test_compose_reply_faq_no_match_triggers_fallback():
         "message_text": "xyzzy",
         "intent": "faq",
     }
-    result = compose_reply(state)
+    # LLM always raises → orchestrator falls back to human-handoff message.
+    from app.services.llm import LLMClient, LLMError
+
+    class _Fail(LLMClient):
+        def classify(self, message):
+            return {"intent": "faq", "confidence": 0.5}
+
+        def compose_reply(self, message, retrieved_row, match_kind):
+            raise LLMError("down")
+
+    result = compose_reply(state, llm_client=_Fail())
     assert result["action"] == "fallback"
-    assert result["fallback_reason"] == "no_faq_match"
+    assert result["fallback_reason"] == "no_data"
 
 
 def test_compose_reply_confirm_order():
@@ -42,7 +53,7 @@ def test_compose_reply_confirm_order():
         "message_text": "Saya order 1",
         "intent": "confirm_order",
     }
-    result = compose_reply(state)
+    result = compose_reply(state, llm_client=MockLLMClient())
     assert result["action"] == "order"
     assert "Owner akan follow up" in result["reply_text"]
 

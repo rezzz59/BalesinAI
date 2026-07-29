@@ -67,7 +67,12 @@ class MockLLMClient(LLMClient):
 
     def compose_reply(self, message: str, retrieved_row: dict | None, match_kind: str) -> str:
         if retrieved_row:
-            return str(retrieved_row.get("name") or retrieved_row.get("nama_produk") or "produk")
+            # Return a deterministic string that includes the source-row text
+            # verbatim, so tests that inspect reply_text (e.g., assert price
+            # appears) still see the source data. Compose-time tests for the
+            # LLMClient interface itself should not depend on this string.
+            parts = [str(v) for v in retrieved_row.values() if v is not None]
+            return " ".join(parts) if parts else "Mohon maaf, produk belum tersedia."
         return "Mohon maaf, produk belum tersedia."
 
 

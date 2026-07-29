@@ -3,7 +3,7 @@ import logging
 from typing import Any
 
 from app.graph.state import ChatState
-from app.services.llm import LLMError
+from app.services.llm import LLMError, LLMValidationError, validate_reply
 
 logger = logging.getLogger(__name__)
 
@@ -72,32 +72,33 @@ def lookup_catalog(state: ChatState, sheets_client: Any) -> dict:
         return {}
 
 
-def compose_reply(state: ChatState) -> dict:
-    """Compose reply text from state. Returns {reply_text, action}."""
+def compose_reply(state: ChatState, llm_client: Any) -> dict:
+    """Compose reply text. Dispatches to LLM (via _compose_with_llm) or fallback path.
+
+    Returns {reply_text, action} (action ∈ "reply" | "fallback" | "order").
+    """
+    return _compose_with_llm(state, llm_client)
+
+
+def _compose_with_llm(state: ChatState, llm_client: Any) -> dict:
+    """Orchestrate LLM compose + validate + 1 retry on validation failure + fallback.
+
+    Order:
+      1. confirm_order → short template reply (no LLM needed).
+      2. Try LLM compose_reply once, validate reply against source row (or None).
+      3. On validation failure: retry once with a stricter hint appended to message.
+      4. On any LLMError: fall back to verbatim-xlsx reply (no retries).
+      5. After 2 validation failures: fall back to verbatim-xlsx reply.
+      6. Verbatim fallback returns the human-handoff message when there's no data.
+    """
     intent = state["intent"]
+    match_kind = state.get("match_kind") or "none"
 
-    if intent == "faq":
-        if state.get("catalog_answer"):
-            return {
-                "reply_text": f"{state['catalog_answer']}",
-                "action": "reply",
-            }
-        return _compose_fallback_message(state, reason="no_faq_match")
+    # Build the retrieved_row we pass to the LLM / validator. May be None
+    # when lookup returned nothing (e.g., match_kind == "none").
+    retrieved_row = _build_retrieved_row(state)
 
-    if intent == "check_product":
-        if state.get("product_match"):
-            p = state["product_match"]
-            ready = "Ready stock" if p.get("ready") == "Y" else "❌ Habis"
-            return {
-                "reply_text": (
-                    f"{p['nama_produk']} — {p.get('harga', '-')}\n"
-                    f"{ready}\n"
-                    f"{p.get('deskripsi', '')}"
-                ),
-                "action": "reply",
-            }
-        return _compose_fallback_message(state, reason="no_product_match")
-
+    # 1. Order confirmation: short template, no LLM.
     if intent == "confirm_order":
         return {
             "reply_text": (
@@ -107,7 +108,84 @@ def compose_reply(state: ChatState) -> dict:
             "action": "order",
         }
 
-    return _compose_fallback_message(state, reason="unknown_intent")
+    message = state["message_text"]
+    strict_hint = (
+        "\n\n[Strict hint: your previous reply contained facts not in our catalog. "
+        "Restrict your reply to ONLY facts from the source row above. Do not invent "
+        "prices, sizes, colors, or stock status.]"
+    )
+
+    # 2-5. Try up to 2 attempts (initial + 1 retry) before falling back.
+    for attempt in range(2):
+        try:
+            message_for_call = message if attempt == 0 else f"{message}{strict_hint}"
+            reply = llm_client.compose_reply(
+                message=message_for_call,
+                retrieved_row=retrieved_row,
+                match_kind=match_kind,
+            )
+            validate_reply(reply, retrieved_row)
+            return {"reply_text": reply, "action": "reply"}
+        except LLMValidationError as e:
+            logger.warning(
+                "compose_validation_failed",
+                extra={
+                    "tenant_id": state["tenant_id"],
+                    "attempt": attempt,
+                    "error": str(e),
+                },
+            )
+            # Loop continues to retry (or fall through to verbatim).
+            continue
+        except LLMError as e:
+            logger.error(
+                "compose_llm_failed",
+                extra={"tenant_id": state["tenant_id"], "error": str(e)},
+            )
+            return _verbatim_fallback(state)
+
+    # Validation failed twice → verbatim-xlsx reply (or human-handoff if no data).
+    logger.warning(
+        "compose_validation_failed_twice",
+        extra={"tenant_id": state["tenant_id"]},
+    )
+    return _verbatim_fallback(state)
+
+
+def _build_retrieved_row(state: ChatState) -> dict | None:
+    """Build the source-row dict passed to the LLM and the validator.
+
+    For FAQ: wrap catalog_answer as a 1-key dict so validate_reply can read it.
+    For check_product: use the matched product dict directly.
+    Returns None if neither is present (no-match path).
+    """
+    intent = state["intent"]
+    if intent == "faq" and state.get("catalog_answer"):
+        return {"pertanyaan": "(implicit FAQ)", "jawaban": state["catalog_answer"]}
+    if state.get("product_match"):
+        return state["product_match"]
+    return None
+
+
+def _verbatim_fallback(state: ChatState) -> dict:
+    """Today's degraded-mode reply: build a reply directly from source row values."""
+    if state.get("catalog_answer"):
+        return {
+            "reply_text": f"{state['catalog_answer']}",
+            "action": "reply",
+        }
+    if state.get("product_match"):
+        p = state["product_match"]
+        ready = "Ready stock" if p.get("ready") == "Y" else "❌ Habis"
+        return {
+            "reply_text": (
+                f"{p['nama_produk']} — {p.get('harga', '-')}\n"
+                f"{ready}\n"
+                f"{p.get('deskripsi', '')}"
+            ),
+            "action": "reply",
+        }
+    return _compose_fallback_message(state, reason="no_data")
 
 
 def _compose_fallback_message(state: ChatState, reason: str) -> dict:
