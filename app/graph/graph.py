@@ -113,7 +113,7 @@ def build_graph(llm_client, sheets_client, gateway_client, checkpointer: Any = N
     Args:
         llm_client: LLM client for classification.
         sheets_client: Sheets client for catalog/FAQ lookups.
-        gateway_client: Phone gateway (Wablas or Fonnte) for sending WhatsApp messages.
+        gateway_client: Fonnte gateway client for sending WhatsApp messages.
         checkpointer: Optional LangGraph saver for persisting checkpoints (e.g., SqliteCheckpointer).
 
     Flow:
