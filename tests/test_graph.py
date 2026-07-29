@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from app.graph.graph import should_fallback, route_after_classify
+from app.graph.graph import build_graph, should_fallback, route_after_classify
 from app.graph.nodes import compose_reply
 from app.graph.state import ChatState
 from app.services.llm import LLMClient, LLMError, LLMValidationError, MockLLMClient
@@ -276,3 +276,82 @@ def test_compose_reply_falls_back_when_llm_raises_on_no_match():
     update = compose_reply(state, llm_client=FailingLLM())
     assert update["action"] == "fallback"
     assert "owner akan follow up" in update["reply_text"].lower()
+
+
+# ---------------------------------------------------------------------------
+# Task 7: Wire llm_client through graph build
+# ---------------------------------------------------------------------------
+
+
+def test_build_graph_accepts_llm_client_kwarg():
+    """build_graph should accept llm_client as a keyword argument."""
+    class FakeSheets:
+        def lookup_faq(self, msg):
+            return None
+
+        def read_catalog(self):
+            return []
+
+    class FakeGateway:
+        async def send_message(self, *args, **kwargs):
+            return {"ok": True}
+
+    llm = MockLLMClient()
+    # This should not raise. If build_graph doesn't accept llm_client kwarg,
+    # this will TypeError.
+    graph = build_graph(llm_client=llm, sheets_client=FakeSheets(), gateway_client=FakeGateway())
+    assert graph is not None
+
+
+def test_built_graph_runs_end_to_end_with_llm_client():
+    """Built graph must invoke compose_reply with the bound llm_client at runtime.
+
+    This is the wiring-level proof that Task 7's responsibility is fulfilled:
+    without the fix, _compose_sync(state) would call compose_reply(state) and
+    TypeError on the missing llm_client kwarg.
+    """
+    class FakeSheets:
+        def lookup_faq(self, msg):
+            return {"pertanyaan": "harga hoodie", "jawaban": "Rp 150.000"}
+
+        def read_catalog(self):
+            return []
+
+    class FakeGateway:
+        def __init__(self):
+            self.sent = []
+
+        async def send_message(self, *args, **kwargs):
+            self.sent.append((args, kwargs))
+            return {"ok": True}
+
+    class CapturingLLM(LLMClient):
+        """Calls MockLLMClient.compose_reply; tracks call count."""
+
+        def __init__(self):
+            self._mock = MockLLMClient()
+            self.compose_calls = 0
+
+        def classify(self, message):
+            return {"intent": "faq", "confidence": 0.9}
+
+        def compose_reply(self, message, retrieved_row, match_kind):
+            self.compose_calls += 1
+            return self._mock.compose_reply(message, retrieved_row, match_kind)
+
+    llm = CapturingLLM()
+    gateway = FakeGateway()
+    graph = build_graph(llm_client=llm, sheets_client=FakeSheets(), gateway_client=gateway)
+
+    state = {
+        "tenant_id": "demo",
+        "wa_number": "+628999",
+        "thread_id": "demo:+628999",
+        "message_text": "berapa harga hoodie?",
+    }
+    result = graph.invoke(state)
+
+    # If wiring is broken, this would TypeError on missing llm_client.
+    assert llm.compose_calls >= 1, "compose_reply was not called via graph wiring"
+    assert isinstance(result.get("reply_text"), str)
+    assert result.get("action") in ("reply", "fallback", "order")

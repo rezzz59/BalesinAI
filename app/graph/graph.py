@@ -78,8 +78,8 @@ def _lookup_node_sync(state, sheets_client):
     return lookup_catalog(state, sheets_client=sheets_client)
 
 
-def _compose_sync(state):
-    return compose_reply(state)
+def _compose_sync(state, llm_client):
+    return compose_reply(state, llm_client=llm_client)
 
 
 def _send_sync(state, gateway_client):
@@ -127,7 +127,7 @@ def build_graph(llm_client, sheets_client, gateway_client, checkpointer: Any = N
     # Add nodes (all sync — async operations bridge via _run_async_from_sync)
     g.add_node("classify_intent", lambda s: _classify_node_sync(s, llm_client))
     g.add_node("lookup_catalog", lambda s: _lookup_node_sync(s, sheets_client))
-    g.add_node("compose_reply", _compose_sync)
+    g.add_node("compose_reply", lambda s: _compose_sync(s, llm_client))
     g.add_node("compose_reply_fallback", _compose_fallback_node)
     g.add_node("send_whatsapp", lambda s: _send_sync(s, gateway_client))
     g.add_node("fallback_human", lambda s: _fallback_sync(s, gateway_client))
