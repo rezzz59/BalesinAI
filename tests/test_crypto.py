@@ -13,7 +13,7 @@ def _key_b64() -> str:
 
 def test_encrypt_decrypt_round_trip():
     key_b64 = _key_b64()
-    plaintext = "wablas-api-key-abc123"
+    plaintext = "fonnte-api-key-abc123"
 
     ciphertext = encrypt_api_key(plaintext, key_b64)
     assert ciphertext != plaintext.encode()
