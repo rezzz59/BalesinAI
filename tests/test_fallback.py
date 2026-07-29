@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.graph.nodes import fallback_human, compose_reply
 from app.graph.state import ChatState
-from app.services.wablas import WablasError
+from app.services.fonnte import FonnteError
 
 
 def test_compose_reply_faq_with_answer():
@@ -49,8 +49,8 @@ def test_compose_reply_confirm_order():
 
 @pytest.mark.asyncio
 async def test_fallback_human_sends_to_owner_and_buyer():
-    fake_wablas = MagicMock()
-    fake_wablas.send_message = AsyncMock(return_value={"status": "ok"})
+    fake_gateway = MagicMock()
+    fake_gateway.send_message = AsyncMock(return_value={"status": "ok"})
 
     fake_tenant_repo = MagicMock()
     fake_tenant_repo.get_tenant = MagicMock(
@@ -72,21 +72,21 @@ async def test_fallback_human_sends_to_owner_and_buyer():
     }
 
     with patch("app.db.tenant_repo.get_tenant", fake_tenant_repo.get_tenant):
-        result = await fallback_human(state, wablas_client=fake_wablas)
+        result = await fallback_human(state, gateway_client=fake_gateway)
 
     assert result == {}
     # Two calls: owner + buyer
-    assert fake_wablas.send_message.call_count == 2
-    owner_call = fake_wablas.send_message.call_args_list[0]
+    assert fake_gateway.send_message.call_count == 2
+    owner_call = fake_gateway.send_message.call_args_list[0]
     assert owner_call[1]["phone"] == "+628111111"
-    buyer_call = fake_wablas.send_message.call_args_list[1]
+    buyer_call = fake_gateway.send_message.call_args_list[1]
     assert buyer_call[1]["phone"] == "+628999"
 
 
 @pytest.mark.asyncio
-async def test_fallback_human_wablas_error():
-    fake_wablas = MagicMock()
-    fake_wablas.send_message = AsyncMock(side_effect=WablasError("wablas down"))
+async def test_fallback_human_fonnte_error():
+    fake_gateway = MagicMock()
+    fake_gateway.send_message = AsyncMock(side_effect=FonnteError("fonnte down"))
 
     fake_tenant = {
         "tenant_id": "demo",
@@ -104,5 +104,5 @@ async def test_fallback_human_wablas_error():
             "message_text": "halo",
             "fallback_reason": "unclear",
         }
-        result = await fallback_human(state, wablas_client=fake_wablas)
+        result = await fallback_human(state, gateway_client=fake_gateway)
         assert result["action"] == "error"
