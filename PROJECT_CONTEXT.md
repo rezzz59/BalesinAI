@@ -13,7 +13,7 @@ A WhatsApp chatbot for an order/business system that uses AI intent classificati
                  (verify signature)      [classify_intent] → Gemini API
                                       [lookup_catalog] → Google Sheets
                                       [compose_reply] → Logic per intent
-                                      [send_whatsapp] → Wablas API
+                                      [send_whatsapp] → Fonnte API
                                       [write_chat_log] → SQLite/DB
 ```
 
@@ -21,7 +21,7 @@ A WhatsApp chatbot for an order/business system that uses AI intent classificati
 
 ### 1. **app/config.py** – Configuration
 - Loads environment variables from `.env` (Pydantic V2)
-- Settings include: `GEMINI_API_KEY`, `WABLAS_API_KEY`, `SECRET_KEY`, etc.
+- Settings include: `GEMINI_API_KEY`, `FONNTE_API_KEY`, `SECRET_KEY`, etc.
 - Intent confidence threshold configurable via `intent_confidence_threshold`
 
 ### 2. **app/services/llm.py** – LLM Client
@@ -41,7 +41,7 @@ Stateful nodes operating on `ChatState` (dict-like):
 | `classify_intent` | Call LLM to classify user message |
 | `lookup_catalog` | Query Sheets client based on intent |
 | `compose_reply` | Generate reply text based on state |
-| `send_whatsapp` | Send reply via Wablas API |
+| `send_whatsapp` | Send reply via Fonnte API |
 | `fallback_human` | Forward to owner if low confidence |
 | `write_chat_log` | Persist conversation log |
 
@@ -57,8 +57,8 @@ Routing functions:
 - `route_after_classify()`: checks confidence threshold → fallback or lookup
 - `route_after_lookup()`: checks if catalog match exists → compose or fallback
 
-### 5. **app/services/wablas.py** – Wablas Client
-Sends messages via Wablas WhatsApp API (`https://wablas.com/api`). Uses session/auth with API key.
+### 5. **app/services/fonnte.py** – Fonnte Client
+Sends messages via Fonnte WhatsApp API (`https://api.fonnte.com`). Uses session/auth with API key.
 
 ### 6. **app/services/sheets.py** – Google Sheets Client
 Queries a public Google Sheet for FAQ and product catalog data.
@@ -66,7 +66,7 @@ Queries a public Google Sheet for FAQ and product catalog data.
 ### 7. **app/api/main.py** – FastAPI Application
 Routes:
 - `POST /message` – Incoming webhook from WhatsApp (or test endpoint)
-- `POST /webhook/wablas` – Signature-verified inbound webhook
+- `POST /webhook/whatsapp` – Signature-verified inbound webhook
 - `GET /docs` – Swagger UI
 - `GET /health` – Health check (requires all env vars set)
 
@@ -77,7 +77,7 @@ Routes:
 ```
 # Required
 GEMINI_API_KEY=<your_gemini_api_key>
-WABLAS_API_KEY=<your_wablas_api_key>
+FONNTE_API_KEY=<your_fonnte_api_key>
 SECRET_KEY=<encryption_key_for_signatures>
 
 # Optional but recommended
@@ -165,7 +165,7 @@ The following issues have been **resolved** during Phase 1 MVP development:
 
 | Issue | Resolution | Location | Date |
 |-------|-----------|----------|------|
-| Wablas endpoint `/api/v1/send-message` changed to `/api/send-message` | Updated in `wablas.py` | v2.1 | — |
+| Fonnte endpoint `/api/v1/send-message` changed to `/api/send-message` | Updated in `fonnte.py` | v2.1 | — |
 | Gemini free-tier quota exhausted | Switched to `gemini-3.1-flash-lite` | `llm.py:MODEL` | — |
 | Typo `FonneteError` → `FonnteError` in except clause | Fixed | `main.py:271` | 2026-07-29 |
 | MockLLMClient as fallback when `google-genai` not installed | Existing in code | `llm.py:_create_llm_client()` | — |
