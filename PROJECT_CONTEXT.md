@@ -120,7 +120,7 @@ LOG_LEVEL=INFO
 - Full graph flow end-to-end working via **Fonnte gateway** (tested: classify → lookup → compose → send)
 - Logger bug fixed in `llm.py` (extra kwarg must be dict, not string)
 - Google Sheets lookup verified working (both FAQ and Catalog tabs read correctly)
-- Webhook authentication (BBearer token for Fonnte) works correctly
+- Webhook authentication (Bearer token for Fonnte) works correctly
 - Input validation at webhook endpoint rejects missing fields
 - Sheets lookup error handling: fallback to no-match path
 - `/health` endpoint returns dependency readiness status (all dependencies ready)
@@ -140,8 +140,6 @@ LOG_LEVEL=INFO
 
 ### ⚠️ Security Note
 The `FONNTE_API_KEY` shown during this session should be rotated on your Fonnte dashboard after confirming MVP works. Regenerate it in https://fonnte.com and update `.env`.
-
----
 
 ---
 
