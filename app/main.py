@@ -224,9 +224,12 @@ async def whatsapp_webhook(request: Request):
                     detail="Missing X-Wablas-Signature or Authorization header",
                 )
             try:
-                verify_wablas_signature(signature_header, raw_body, wablas_api_key)
-            except SignatureError as e:
-                raise HTTPException(status_code=401, detail=f"Signature error: {e}")
+                if not verify_wablas_signature(signature_header, raw_body, wablas_api_key):
+                    logger.error("signature_verification_failed")
+                    raise HTTPException(status_code=401, detail="Invalid webhook signature")
+            except SignatureError:
+                logger.error("signature_verification_failed", exc_info=True)
+                raise HTTPException(status_code=401, detail="Invalid webhook signature")
 
     tenant_id = data.get("tenant_id", "default")
     wa_number = data.get("wa_number", "")
@@ -265,13 +268,13 @@ async def whatsapp_webhook(request: Request):
             extra={"thread_id": state.get("thread_id"), "intent": result.get("intent")},
         )
         return {"status": "ok", "state": result}
-    except LLMError as e:
+    except LLMError:
         logger.error("llm_error", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"LLM error: {e}")
-    except (FonnteError, WablasError, PhoneGatewayException) as e:
+        raise HTTPException(status_code=500, detail="Language service unavailable")
+    except (FonnteError, WablasError, PhoneGatewayException):
         logger.error("whatsapp_gateway_error", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"WhatsApp gateway error: {e}")
-    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail="Message delivery failed")
+    except Exception:  # noqa: BLE001
         logger.error("unexpected_error", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal error")
 
@@ -286,9 +289,14 @@ async def health_check():
     }
 
 
-# Helper for tests / dev — reset compiled graph so injected mocks take effect
+# Helper for tests / dev — reset compiled graph so injected mocks take effect.
+# Loopback-only: not exposed to network callers (Bypass via tunneling still works
+# for legit local testing, but the endpoint cannot be reached from external IPs).
 @app.post("/debug/reset-graph/")
-async def debug_reset_graph():
+async def debug_reset_graph(request: Request):
+    client_host = request.client.host if request.client else None
+    if client_host not in {"127.0.0.1", "::1", "localhost", None}:
+        raise HTTPException(status_code=403, detail="Forbidden")
     reset_compiled_graph_for_testing()
     global _llm_client, _sheets_client, _phone_gateway, _checkpointer, _compiled_graph
     _llm_client = None

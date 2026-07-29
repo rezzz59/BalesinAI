@@ -1,5 +1,6 @@
 """Google Sheets client adapter — reads FAQ & Katalog tabs."""
 import logging
+import os
 import time
 from threading import Lock
 from typing import Any
@@ -32,6 +33,12 @@ class GoogleSheetsClient:
     def _get_spreadsheet(self):
         if self._spreadsheet is None:
             try:
+                if not self.credentials_json_path:
+                    raise SheetsError("Credentials path is empty")
+                if not os.path.isfile(self.credentials_json_path):
+                    raise SheetsError(
+                        f"Credentials file not found: {self.credentials_json_path}"
+                    )
                 gc = gspread.service_account(filename=self.credentials_json_path)
                 self._spreadsheet = gc.open_by_key(self.spreadsheet_id)
             except Exception as e:

@@ -18,6 +18,7 @@ def client(monkeypatch):
     monkeypatch.setenv("WABLAS_API_KEY", SECRET)
     monkeypatch.setenv("GEMINI_API_KEY", "test-gemini-key")
     monkeypatch.setenv("GOOGLE_SHEETS_CREDENTIALS_JSON_PATH", "./dummy.json")
+    monkeypatch.setenv("whatsapp_gateway", "wablas")
     get_settings.cache_clear()
     from app.main import app
     return TestClient(app)
@@ -98,7 +99,7 @@ def test_invalid_signature_returns_401(client):
         },
     )
     assert response.status_code == 401
-    assert "Invalid signature" in response.json()["detail"] or "Signature error" in response.json()["detail"]
+    assert response.json()["detail"] == "Invalid webhook signature"
 
 
 def test_wrong_secret_rejects_signature(client):
