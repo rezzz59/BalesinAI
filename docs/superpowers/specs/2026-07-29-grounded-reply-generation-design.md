@@ -65,7 +65,7 @@ Used when a relevant row was matched and the keyword overlap is high. The LLM is
 
 - Persona: customer-service teammate, WhatsApp, Indonesian UMKM seller.
 - Tone: warm, polite, relaxed. Use "Kak" to address the buyer, "kami" as pronoun.
-- **Hard constraint**: any numeric fact (price, size, stock indicator) must appear EXACTLY as in the source row.
+- **Hard constraint**: any numeric fact (price, size, stock indicator) must appear EXACTLY as in the source row, character-for-character. The LLM may not reformat "Rp 50.000" as "Rp50,000" or "50000".
 - Allowed: natural greetings ("Halo Kak!"), closers ("Boleh order ya 🙏"), connecting phrases.
 - Forbidden: any price, size, color, stock status, or store-policy wording that does not appear in the source row.
 - If the source row does not fully answer the question, say so politely and invite the buyer to ask more — but never invent.
@@ -115,10 +115,11 @@ Implementations for `GeminiLLMClient` and `AnthropicLLMClient` mirror today's `c
 
 A new helper `validate_reply(reply, source_row)` enforces the no-hallucination rule:
 
-1. Extract numeric tokens from the reply (regex `r"\d+(?:\.\d+)?"`).
-2. Extract numeric tokens from `source_row` (across all string fields).
+1. Extract numeric tokens from the reply (regex `r"\d+(?:\.\d+)?"` — captures individual digits/groups, including Indonesian thousands-separated forms like "50.000" which the regex matches as `50` and `000`; both must appear in the source).
+2. Extract numeric tokens from `source_row` (across all string fields, same regex).
 3. If any numeric token in the reply is NOT in the source row, raise `LLMValidationError`.
 4. Also check size strings (S/M/L/XL/XXL/XXXL) and stock indicators ("ready", "habis", "Y"/"N") similarly.
+5. **Strict formatting**: prices, sizes, and stock strings must appear character-for-character. The LLM may not reformat "Rp 50.000" as "Rp50,000" or "50000" — those would be rejected as different strings.
 
 Validation is conservative — it errs on the side of false positives (rejecting safe replies). The trade-off is acceptable because the fallback path exists (see below).
 
@@ -194,7 +195,6 @@ Use `fixtures/sample_customer_questions.txt` (30 questions) against the live web
 - Confidence threshold (50%) needs tuning after implementation. If too many medium-confidence paths land, raise to 70%. If too few, lower to 30%.
 - The validation regex is conservative — Indonesian pricing like "Rp 50.000" or "Rp1.500.000" must pass through unchanged. Confirm regex covers these.
 - Cost monitoring is not added in this scope — only the LLM call count. Phase 2 candidate: per-tenant call counters.
-- The "kak" greeting in `COMPOSE_STRICT_SYSTEM` and the absence of it in `COMPOSE_PARTIAL_SYSTEM` are intentional (success tone vs partial-answer tone). Confirm with user feedback after manual smoke test.
 
 ## Acceptance criteria
 
