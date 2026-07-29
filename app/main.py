@@ -12,7 +12,6 @@ from fastapi.responses import JSONResponse
 from app.config import get_settings
 from app.db import init_db  # Ensure DB tables are created
 from app.db.checkpointer import SqliteCheckpointer
-from app.auth.signature import verify_wablas_signature, SignatureError
 from app.graph.graph import (
     build_graph,
     reset_compiled_graph_for_testing,
@@ -24,9 +23,8 @@ from app.services.llm import (
     LLMError,
 )
 from app.services.sheets import GoogleSheetsClient
-from app.services.phone_gateway import PhoneGateway, PhoneGatewayException
+from app.services.phone_gateway import PhoneGatewayException
 from app.services.fonnte import FonnteGateway, FonnteError
-from app.services.wablas import WablasClient, WablasError
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -92,31 +90,21 @@ def _create_sheets_client():
 
 
 def _create_phone_gateway():
-    """Create phone gateway client based on WHATSAPP_GATEWAY config.
+    """Build the WhatsApp gateway (Fonnte).
 
-    Returns:
-        - FonnteGateway if whatsapp_gateway == "fonnte"
-        - WablasClient if whatsapp_gateway == "wablas"
+    The factory previously branched on `settings.whatsapp_gateway` (fonnte vs wablas).
+    As of the gateway-collapse refactor, only Fonnte is supported; Wablas has been
+    removed. Future gateway additions should extend this factory with explicit
+    per-gateway credential validation.
 
     Raises:
-        RuntimeError if required env vars are missing for the chosen gateway.
+        RuntimeError if FONNTE_API_KEY is not configured.
     """
     settings = get_settings()
-    gateway = (settings.whatsapp_gateway or "wablas").lower()
-
-    if gateway == "fonnte":
-        if not settings.fonnte_api_key:
-            raise RuntimeError("FONNTE_API_KEY not configured")
-        return FonnteGateway(api_key=settings.fonnte_api_key)
-
-    elif gateway == "wablas":
-        if not settings.wablas_base_url:
-            raise RuntimeError("WABLAS_BASE_URL must be set")
-        api_key = settings.wablas_api_key or ""
-        return WablasClient(base_url=settings.wablas_base_url, api_key=api_key)
-
-    else:
-        raise RuntimeError(f"Unknown WHATSAPP_GATEWAY: {gateway}. Use 'wablas' or 'fonnte'.")
+    fonnte_key = settings.fonnte_api_key
+    if not fonnte_key:
+        raise RuntimeError("FONNTE_API_KEY not configured")
+    return FonnteGateway(api_key=fonnte_key)
 
 
 def _ensure_clients():
@@ -178,58 +166,23 @@ async def whatsapp_webhook(request: Request):
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="Invalid JSON payload")
 
-    # Get API key for auth verification based on selected gateway
+    # Get API key for auth verification (Fonnte only)
     settings = get_settings()
-    gateway = (settings.whatsapp_gateway or "wablas").lower()
-
-    if gateway == "fonnte":
-        api_key = settings.fonnte_api_key or ""
-        if not api_key:
-            raise HTTPException(
-                status_code=500, detail="FONNTE_API_KEY not configured on server"
-            )
-        # Fonnte uses Bearer token auth
-        auth_header = request.headers.get("Authorization", "")
-        if not auth_header.startswith("Bearer "):
-            raise HTTPException(
-                status_code=401,
-                detail="Missing Bearer Authorization header (Fonnte auth)",
-            )
-        provided_token = auth_header[7:]
-        if provided_token != api_key:
-            raise HTTPException(status_code=401, detail="Invalid Fonnte API key")
-    else:
-        # Wablas
-        wablas_api_key = settings.wablas_api_key or ""
-        if not wablas_api_key:
-            raise HTTPException(
-                status_code=500, detail="WABLAS_API_KEY not configured on server"
-            )
-        # Verify Wablas authentication — supports two methods:
-        # 1. Authorization header: Bearer <API_KEY> (token-based)
-        # 2. X-Wablas-Signature header (HMAC-SHA256 of body)
-        auth_header = request.headers.get("Authorization", "")
-
-        if auth_header.startswith("Bearer "):
-            # Method 1: Token-based auth
-            provided_token = auth_header[7:]  # Remove "Bearer "
-            if provided_token != wablas_api_key:
-                raise HTTPException(status_code=401, detail="Invalid API key")
-        else:
-            # Method 2: Signature-based auth
-            signature_header = request.headers.get("X-Wablas-Signature")
-            if not signature_header:
-                raise HTTPException(
-                    status_code=401,
-                    detail="Missing X-Wablas-Signature or Authorization header",
-                )
-            try:
-                if not verify_wablas_signature(signature_header, raw_body, wablas_api_key):
-                    logger.error("signature_verification_failed")
-                    raise HTTPException(status_code=401, detail="Invalid webhook signature")
-            except SignatureError:
-                logger.error("signature_verification_failed", exc_info=True)
-                raise HTTPException(status_code=401, detail="Invalid webhook signature")
+    fonnte_api_key = settings.fonnte_api_key or ""
+    if not fonnte_api_key:
+        raise HTTPException(
+            status_code=500, detail="FONNTE_API_KEY not configured on server"
+        )
+    # Fonnte uses Bearer token auth
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        raise HTTPException(
+            status_code=401,
+            detail="Missing Bearer Authorization header",
+        )
+    provided_token = auth_header[7:]
+    if provided_token != fonnte_api_key:
+        raise HTTPException(status_code=401, detail="Invalid Fonnte API key")
 
     tenant_id = data.get("tenant_id", "default")
     wa_number = data.get("wa_number", "")
@@ -271,7 +224,7 @@ async def whatsapp_webhook(request: Request):
     except LLMError:
         logger.error("llm_error", exc_info=True)
         raise HTTPException(status_code=500, detail="Language service unavailable")
-    except (FonnteError, WablasError, PhoneGatewayException):
+    except (FonnteError, PhoneGatewayException):
         logger.error("whatsapp_gateway_error", exc_info=True)
         raise HTTPException(status_code=500, detail="Message delivery failed")
     except Exception:  # noqa: BLE001
