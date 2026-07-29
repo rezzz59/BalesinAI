@@ -4,7 +4,7 @@
 
 **Goal:** Implement MVP Fase 1 dari OrderCloser Lite — webhook WhatsApp + LangGraph (intent classification, lookup katalog/FAQ, auto reply, fallback ke manusia) untuk single tenant, deploy lokal + ngrok.
 
-**Architecture:** FastAPI monolith dengan boundary jelas: `auth/` (signature verify), `services/` (LLM/Sheets/Wablas adapters), `graph/` (LangGraph state & nodes), `db/` (SQLAlchemy + LangGraph checkpointer). Single-process, single-tenant, semua external API di-boundary services.
+**Architecture:** FastAPI monolith dengan boundary jelas: `auth/` (signature verify), `services/` (LLM/Sheets/Fonnte adapters), `graph/` (LangGraph state & nodes), `db/` (SQLAlchemy + LangGraph checkpointer). Single-process, single-tenant, semua external API di-boundary services.
 
 **Tech Stack:** Python 3.11, FastAPI 0.115+, LangGraph 1.x, langgraph-checkpoint-sqlite, langchain-anthropic, gspread, httpx, SQLAlchemy 2.0, cryptography, pydantic-settings 2.4+, pytest.
 
@@ -29,14 +29,14 @@ Sebelum mulai task, ini peta file yang akan dibuat/diubah:
 - `app/webhook.py` — webhook endpoint handler
 - `app/health.py` — health/readiness routes
 - `app/config.py` — pydantic-settings
-- `app/auth/signature.py` — Wablas HMAC verification
+- `app/auth/signature.py` — Fonnte HMAC verification
 - `app/graph/state.py` — ChatState TypedDict
 - `app/graph/prompts.py` — Claude Haiku prompt templates
 - `app/graph/nodes.py` — 5 LangGraph nodes
 - `app/graph/graph.py` — compile StateGraph
 - `app/services/llm.py` — ClaudeHaikuClient adapter
 - `app/services/sheets.py` — GoogleSheetsClient adapter
-- `app/services/wablas.py` — WablasClient adapter
+- `app/services/fonnte.py` — FonnteClient adapter
 - `app/services/crypto.py` — AES-GCM encrypt/decrypt
 - `app/db/engine.py` — SQLAlchemy engine + session factory
 - `app/db/models.py` — TenantConfig & ChatLog ORM
@@ -162,8 +162,8 @@ htmlcov/
 # Anthropic (required)
 ANTHROPIC_API_KEY=sk-ant-your-key-here
 
-# Wablas (required)
-WABLAS_BASE_URL=https://api.wablas.com
+# Fonnte (required)
+FONNTE_BASE_URL=https://api.fonnte.com
 
 # Google Sheets (required)
 GOOGLE_SHEETS_CREDENTIALS_JSON_PATH=./secrets/sheets-sa.json
@@ -219,7 +219,7 @@ python scripts/seed_tenant.py \
     --tenant demo \
     --sheet-id YOUR_GOOGLE_SHEET_ID \
     --wa-number +6281234567890 \
-    --api-key YOUR_WABLAS_API_KEY
+    --api-key YOUR_FONNTE_API_KEY
 
 # Run
 uvicorn app.main:app --reload --port 8000
@@ -269,7 +269,7 @@ from app.config import Settings, get_settings
 def test_get_settings_returns_singleton(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     monkeypatch.setenv("ENCRYPTION_KEY", "dGVzdC1rZXktMTIzNDU2Nzg5MGFiY2RlZg==")
-    monkeypatch.setenv("WABLAS_BASE_URL", "https://test.wablas.com")
+    monkeypatch.setenv("FONNTE_BASE_URL", "https://test.fonnte.com")
     monkeypatch.setenv("GOOGLE_SHEETS_CREDENTIALS_JSON_PATH", "./secrets/test.json")
 
     s1 = get_settings()
@@ -280,21 +280,21 @@ def test_get_settings_returns_singleton(monkeypatch):
 def test_settings_loads_required_fields(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     monkeypatch.setenv("ENCRYPTION_KEY", "dGVzdC1rZXktMTIzNDU2Nzg5MGFiY2RlZg==")
-    monkeypatch.setenv("WABLAS_BASE_URL", "https://test.wablas.com")
+    monkeypatch.setenv("FONNTE_BASE_URL", "https://test.fonnte.com")
     monkeypatch.setenv("GOOGLE_SHEETS_CREDENTIALS_JSON_PATH", "./secrets/test.json")
 
     get_settings.cache_clear()  # type: ignore[attr-defined]
     settings = Settings()
 
     assert settings.anthropic_api_key == "test-key"
-    assert settings.wablas_base_url == "https://test.wablas.com"
+    assert settings.fonnte_base_url == "https://test.fonnte.com"
     assert settings.intent_confidence_threshold == 0.6  # default
 
 
 def test_settings_custom_threshold(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     monkeypatch.setenv("ENCRYPTION_KEY", "dGVzdC1rZXktMTIzNDU2Nzg5MGFiY2RlZg==")
-    monkeypatch.setenv("WABLAS_BASE_URL", "https://test.wablas.com")
+    monkeypatch.setenv("FONNTE_BASE_URL", "https://test.fonnte.com")
     monkeypatch.setenv("GOOGLE_SHEETS_CREDENTIALS_JSON_PATH", "./secrets/test.json")
     monkeypatch.setenv("INTENT_CONFIDENCE_THRESHOLD", "0.75")
 
@@ -338,7 +338,7 @@ class Settings(BaseSettings):
     # Required
     anthropic_api_key: str
     encryption_key: str  # base64-encoded 32 bytes
-    wablas_base_url: str
+    fonnte_base_url: str
     google_sheets_credentials_json_path: str
 
     # Optional with defaults
@@ -395,7 +395,7 @@ def _key_b64() -> str:
 
 def test_encrypt_decrypt_round_trip():
     key_b64 = _key_b64()
-    plaintext = "wablas-api-key-abc123"
+    plaintext = "fonnte-api-key-abc123"
 
     ciphertext = encrypt_api_key(plaintext, key_b64)
     assert ciphertext != plaintext.encode()
@@ -750,7 +750,7 @@ def test_tenant_repo_insert_and_get():
     from app.services.crypto import encrypt_api_key
 
     settings = get_settings()
-    encrypted = encrypt_api_key("wablas-key-xyz", settings.encryption_key)
+    encrypted = encrypt_api_key("fonnte-key-xyz", settings.encryption_key)
 
     insert_tenant(
         tenant_id="demo",
@@ -763,7 +763,7 @@ def test_tenant_repo_insert_and_get():
     assert tenant is not None
     assert tenant["tenant_id"] == "demo"
     assert tenant["google_sheet_id"] == "sheet-abc"
-    assert decrypt_api_key(tenant["wa_api_key_encrypted"], settings.encryption_key) == "wablas-key-xyz"
+    assert decrypt_api_key(tenant["wa_api_key_encrypted"], settings.encryption_key) == "fonnte-key-xyz"
 
 
 def test_tenant_repo_not_found_returns_none():
@@ -979,33 +979,33 @@ Expected: 4 tests pass
 
 ---
 
-## Task 6: Wablas Client Service
+## Task 6: Fonnte Client Service
 
 **Files:**
-- Create: `app/services/wablas.py`
-- Test: `tests/test_wablas.py`
+- Create: `app/services/fonnte.py`
+- Test: `tests/test_fonnte.py`
 
-- [ ] **Step 1: Write failing test `tests/test_wablas.py`**
+- [ ] **Step 1: Write failing test `tests/test_fonnte.py`**
 
 ```python
-"""Tests for app.services.wablas."""
+"""Tests for app.services.fonnte."""
 import pytest
 from unittest.mock import AsyncMock, patch
 
-from app.services.wablas import WablasClient, WablasError
+from app.services.fonnte import FonnteClient, FonnteError
 
 
 @pytest.fixture
 def client():
-    return WablasClient(
-        base_url="https://api.wablas.com",
+    return FonnteClient(
+        base_url="https://api.fonnte.com",
         api_key="test-key-xyz",
         device_id="device-abc",
     )
 
 
 def test_send_message_makes_post_request(client):
-    with patch("app.services.wablas.httpx.AsyncClient") as mock_client_cls:
+    with patch("app.services.fonnte.httpx.AsyncClient") as mock_client_cls:
         mock_response = AsyncMock()
         mock_response.status_code = 200
         mock_response.json = lambda: {"status": "success", "message_id": "msg-123"}
@@ -1030,7 +1030,7 @@ def test_send_message_makes_post_request(client):
 
 
 def test_send_message_retries_on_5xx(client):
-    with patch("app.services.wablas.httpx.AsyncClient") as mock_client_cls:
+    with patch("app.services.fonnte.httpx.AsyncClient") as mock_client_cls:
         mock_response_fail = AsyncMock()
         mock_response_fail.status_code = 503
         mock_response_fail.raise_for_status.side_effect = Exception("503")
@@ -1056,7 +1056,7 @@ def test_send_message_retries_on_5xx(client):
 
 
 def test_send_message_raises_after_max_retries(client):
-    with patch("app.services.wablas.httpx.AsyncClient") as mock_client_cls:
+    with patch("app.services.fonnte.httpx.AsyncClient") as mock_client_cls:
         mock_response_fail = AsyncMock()
         mock_response_fail.status_code = 503
         mock_response_fail.raise_for_status.side_effect = Exception("503")
@@ -1068,19 +1068,19 @@ def test_send_message_raises_after_max_retries(client):
         mock_client_cls.return_value = mock_client
 
         import asyncio
-        with pytest.raises(WablasError):
+        with pytest.raises(FonnteError):
             asyncio.run(client.send_message(phone="+628123", message="Hi"))
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `pytest tests/test_wablas.py -v`
+Run: `pytest tests/test_fonnte.py -v`
 Expected: FAIL with `ModuleNotFoundError`
 
-- [ ] **Step 3: Implement `app/services/wablas.py`**
+- [ ] **Step 3: Implement `app/services/fonnte.py`**
 
 ```python
-"""Wablas API client adapter."""
+"""Fonnte API client adapter."""
 import asyncio
 import logging
 from typing import Any
@@ -1090,12 +1090,12 @@ import httpx
 logger = logging.getLogger(__name__)
 
 
-class WablasError(Exception):
-    """Raised when Wablas API call fails after retries."""
+class FonnteError(Exception):
+    """Raised when Fonnte API call fails after retries."""
 
 
-class WablasClient:
-    """Async client for Wablas WhatsApp API.
+class FonnteClient:
+    """Async client for Fonnte WhatsApp API.
 
     Endpoint: POST /api/v1/send-message
     Auth: Bearer <api_key> header
@@ -1111,7 +1111,7 @@ class WablasClient:
     async def send_message(self, phone: str, message: str) -> dict[str, Any]:
         """Send text message to a WhatsApp number. Returns API response dict.
 
-        Retries 3x on 5xx with exponential backoff. Raises WablasError after exhaustion.
+        Retries 3x on 5xx with exponential backoff. Raises FonnteError after exhaustion.
         """
         url = f"{self.base_url}/api/v1/send-message"
         headers = {
@@ -1129,26 +1129,26 @@ class WablasClient:
                 try:
                     response = await client.post(url, headers=headers, json=payload)
                     if response.status_code >= 500:
-                        raise WablasError(f"Wablas {response.status_code}")
+                        raise FonnteError(f"Fonnte {response.status_code}")
 
                     response.raise_for_status()
                     return response.json()
 
-                except (httpx.HTTPStatusError, WablasError, httpx.RequestError) as e:
+                except (httpx.HTTPStatusError, FonnteError, httpx.RequestError) as e:
                     last_exception = e
                     logger.warning(
-                        "wablas_send_attempt_failed",
+                        "fonnte_send_attempt_failed",
                         extra={"attempt": attempt, "phone": phone[-4:], "error": str(e)},
                     )
                     if attempt < self.max_retries:
                         await asyncio.sleep(0.1 * (2 ** (attempt - 1)))
 
-        raise WablasError(f"Failed after {self.max_retries} retries: {last_exception}")
+        raise FonnteError(f"Failed after {self.max_retries} retries: {last_exception}")
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `pytest tests/test_wablas.py -v`
+Run: `pytest tests/test_fonnte.py -v`
 Expected: 3 tests pass
 
 ---
@@ -1585,10 +1585,10 @@ import hashlib
 
 import pytest
 
-from app.auth.signature import SignatureError, verify_wablas_signature
+from app.auth.signature import SignatureError, verify_fonnte_signature
 
 
-SECRET = "test-wablas-api-key-xyz"
+SECRET = "test-fonnte-api-key-xyz"
 BODY = b'{"phone": "+6281234567890", "message": "Halo"}'
 
 
@@ -1598,25 +1598,25 @@ def _sign(body: bytes, secret: str) -> str:
 
 def test_verify_valid_signature_returns_true():
     sig = _sign(BODY, SECRET)
-    assert verify_wablas_signature(sig, BODY, SECRET) is True
+    assert verify_fonnte_signature(sig, BODY, SECRET) is True
 
 
 def test_verify_invalid_signature_returns_false():
     sig = _sign(BODY, SECRET)
-    assert verify_wablas_signature(sig, BODY, "wrong-secret") is False
-    assert verify_wablas_signature("deadbeef", BODY, SECRET) is False
+    assert verify_fonnte_signature(sig, BODY, "wrong-secret") is False
+    assert verify_fonnte_signature("deadbeef", BODY, SECRET) is False
 
 
 def test_verify_empty_signature_raises():
     with pytest.raises(SignatureError):
-        verify_wablas_signature("", BODY, SECRET)
+        verify_fonnte_signature("", BODY, SECRET)
 
 
 def test_verify_constant_time_compare():
     """Verify uses hmac.compare_digest (smoke test — just ensure no exception on equal length)."""
     sig = _sign(BODY, SECRET)
     # If we use hmac.compare_digest, valid signature returns True
-    assert verify_wablas_signature(sig, BODY, SECRET) is True
+    assert verify_fonnte_signature(sig, BODY, SECRET) is True
 ```
 
 - [ ] **Step 3: Run test to verify it fails**
@@ -1627,12 +1627,12 @@ Expected: FAIL with `ModuleNotFoundError`
 - [ ] **Step 4: Implement `app/auth/signature.py`**
 
 ```python
-"""Wablas webhook signature verification.
+"""Fonnte webhook signature verification.
 
-Wablas sends an HMAC SHA-256 signature in the request header (typically X-Wablas-Signature
+Fonnte sends an HMAC SHA-256 signature in the request header (typically X-Fonnte-Signature
 — exact name TBD, will be confirmed during implementation).
 
-The signature is computed over the raw request body using the tenant's Wablas API key.
+The signature is computed over the raw request body using the tenant's Fonnte API key.
 """
 import hmac
 import hashlib
@@ -1642,12 +1642,12 @@ class SignatureError(Exception):
     """Raised when signature header is missing or malformed."""
 
 
-def verify_wablas_signature(
+def verify_fonnte_signature(
     signature_header: str,
     request_body: bytes,
     secret: str,
 ) -> bool:
-    """Verify a Wablas webhook signature using HMAC SHA-256 with constant-time compare.
+    """Verify a Fonnte webhook signature using HMAC SHA-256 with constant-time compare.
 
     Returns True if signature is valid, False otherwise.
     Raises SignatureError if signature_header is missing/empty.
@@ -1984,16 +1984,16 @@ def _compose_fallback_message(state: ChatState, reason: str) -> dict:
     }
 
 
-async def send_whatsapp(state: ChatState, wablas_client: Any) -> dict:
-    """Send reply_text to buyer via Wablas. Returns {} on success.
+async def send_whatsapp(state: ChatState, fonnte_client: Any) -> dict:
+    """Send reply_text to buyer via Fonnte. Returns {} on success.
 
     Returns {action: "error", response: <error>} if all retries fail.
     Does NOT raise — caller must check return.
     """
-    from app.services.wablas import WablasError
+    from app.services.fonnte import FonnteError
 
     try:
-        await wablas_client.send_message(
+        await fonnte_client.send_message(
             phone=state["wa_number"],
             message=state["reply_text"],
         )
@@ -2005,7 +2005,7 @@ async def send_whatsapp(state: ChatState, wablas_client: Any) -> dict:
             },
         )
         return {}
-    except WablasError as e:
+    except FonnteError as e:
         logger.error(
             "whatsapp_send_failed",
             extra={
@@ -2017,13 +2017,13 @@ async def send_whatsapp(state: ChatState, wablas_client: Any) -> dict:
         return {"action": "error"}
 
 
-async def fallback_human(state: ChatState, wablas_client: Any) -> dict:
-    """Forward original message to owner via Wablas. Also sends buyer acknowledgement.
+async def fallback_human(state: ChatState, fonnte_client: Any) -> dict:
+    """Forward original message to owner via Fonnte. Also sends buyer acknowledgement.
 
     Caller MUST have already set fallback_reason before calling.
-    Returns {} on success, {action: "error"} if Wablas fails.
+    Returns {} on success, {action: "error"} if Fonnte fails.
     """
-    from app.services.wablas import WablasError
+    from app.services.fonnte import FonnteError
 
     # Need owner_wa_number — but it's not in ChatState. Read from tenant repo.
     from app.db.tenant_repo import get_tenant
@@ -2045,12 +2045,12 @@ async def fallback_human(state: ChatState, wablas_client: Any) -> dict:
 
     try:
         # 1. Send to owner
-        await wablas_client.send_message(
+        await fonnte_client.send_message(
             phone=tenant["owner_wa_number"],
             message=owner_msg,
         )
         # 2. Send acknowledgement to buyer
-        await wablas_client.send_message(
+        await fonnte_client.send_message(
             phone=state["wa_number"],
             message="Sedang kami cek, owner akan follow up ya 🙏",
         )
@@ -2063,7 +2063,7 @@ async def fallback_human(state: ChatState, wablas_client: Any) -> dict:
             },
         )
         return {}
-    except WablasError as e:
+    except FonnteError as e:
         logger.error("fallback_send_failed", extra={"error": str(e)})
         return {"action": "error"}
 
@@ -2139,8 +2139,8 @@ def test_compose_reply_confirm_order():
 
 @pytest.mark.asyncio
 async def test_fallback_human_sends_to_owner_and_buyer():
-    fake_wablas = MagicMock()
-    fake_wablas.send_message = AsyncMock(return_value={"status": "ok"})
+    fake_fonnte = MagicMock()
+    fake_fonnte.send_message = AsyncMock(return_value={"status": "ok"})
 
     fake_tenant_repo = MagicMock()
     fake_tenant_repo.get_tenant = MagicMock(
@@ -2162,21 +2162,21 @@ async def test_fallback_human_sends_to_owner_and_buyer():
     }
 
     with patch("app.graph.nodes.get_tenant", fake_tenant_repo.get_tenant):
-        result = await fallback_human(state, wablas_client=fake_wablas)
+        result = await fallback_human(state, fonnte_client=fake_fonnte)
 
     assert result == {}
     # Two calls: owner + buyer
-    assert fake_wablas.send_message.call_count == 2
-    owner_call = fake_wablas.send_message.call_args_list[0]
+    assert fake_fonnte.send_message.call_count == 2
+    owner_call = fake_fonnte.send_message.call_args_list[0]
     assert owner_call[1]["phone"] == "+628111111"
-    buyer_call = fake_wablas.send_message.call_args_list[1]
+    buyer_call = fake_fonnte.send_message.call_args_list[1]
     assert buyer_call[1]["phone"] == "+628999"
 
 
 @pytest.mark.asyncio
-async def test_fallback_human_wablas_error():
-    fake_wablas = MagicMock()
-    fake_wablas.send_message = AsyncMock(side_effect=Exception("wablas down"))
+async def test_fallback_human_fonnte_error():
+    fake_fonnte = MagicMock()
+    fake_fonnte.send_message = AsyncMock(side_effect=Exception("fonnte down"))
 
     fake_tenant = {
         "tenant_id": "demo",
@@ -2194,7 +2194,7 @@ async def test_fallback_human_wablas_error():
             "message_text": "halo",
             "fallback_reason": "unclear",
         }
-        result = await fallback_human(state, wablas_client=fake_wablas)
+        result = await fallback_human(state, fonnte_client=fake_fonnte)
         assert result["action"] == "error"
 ```
 
@@ -2365,13 +2365,13 @@ async def _compose_async(state):
     return compose_reply(state)
 
 
-async def _send_async(state, wablas_client):
-    state.update(await send_whatsapp(state, wablas_client=wablas_client))
+async def _send_async(state, fonnte_client):
+    state.update(await send_whatsapp(state, fonnte_client=fonnte_client))
     return {}
 
 
-async def _fallback_async(state, wablas_client):
-    state.update(await fallback_human(state, wablas_client=wablas_client))
+async def _fallback_async(state, fonnte_client):
+    state.update(await fallback_human(state, fonnte_client=fonnte_client))
     return {}
 
 
@@ -2388,7 +2388,7 @@ async def _compose_fallback_node(state):
     }
 
 
-def build_graph(llm_client, sheets_client, wablas_client):
+def build_graph(llm_client, sheets_client, fonnte_client):
     """Construct and compile the StateGraph.
 
     Flow:
@@ -2404,8 +2404,8 @@ def build_graph(llm_client, sheets_client, wablas_client):
     g.add_node("lookup_catalog", lambda s: _lookup_node_async(s, sheets_client))
     g.add_node("compose_reply", _compose_async)
     g.add_node("compose_reply_fallback", _compose_fallback_node)
-    g.add_node("send_whatsapp", lambda s: _send_async(s, wablas_client))
-    g.add_node("fallback_human", lambda s: _fallback_async(s, wablas_client))
+    g.add_node("send_whatsapp", lambda s: _send_async(s, fonnte_client))
+    g.add_node("fallback_human", lambda s: _fallback_async(s, fonnte_client))
     g.add_node("write_chat_log", write_chat_log)
 
     # Edges
@@ -2436,13 +2436,13 @@ def build_graph(llm_client, sheets_client, wablas_client):
 _compiled_graph = None
 
 
-def get_compiled_graph(llm_client=None, sheets_client=None, wablas_client=None):
+def get_compiled_graph(llm_client=None, sheets_client=None, fonnte_client=None):
     """Get the compiled graph (lazy-init). Tests must inject clients."""
     global _compiled_graph
     if _compiled_graph is None:
-        if llm_client is None or sheets_client is None or wablas_client is None:
+        if llm_client is None or sheets_client is None or fonnte_client is None:
             raise RuntimeError("Clients not injected — call build_graph() explicitly first")
-        _compiled_graph = build_graph(llm_client, sheets_client, wablas_client)
+        _compiled_graph = build_graph(llm_client, sheets_client, fonnte_client)
     return _compiled_graph
 
 
@@ -2540,7 +2540,7 @@ def tenant_env(monkeypatch):
     """Set required env vars and insert a tenant row in in-memory DB."""
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-anthropic-key")
     monkeypatch.setenv("ENCRYPTION_KEY", base64.b64encode(b"x" * 32).decode())
-    monkeypatch.setenv("WABLAS_BASE_URL", "https://api.wablas.com")
+    monkeypatch.setenv("FONNTE_BASE_URL", "https://api.fonnte.com")
     monkeypatch.setenv("GOOGLE_SHEETS_CREDENTIALS_JSON_PATH", "./secrets/sheets-sa.json")
 
     # Reset settings cache
@@ -2565,7 +2565,7 @@ def client(tenant_env):
 
     # Insert tenant
     settings = get_settings()
-    encrypted = encrypt_api_key("wablas-secret-key", settings.encryption_key)
+    encrypted = encrypt_api_key("fonnte-secret-key", settings.encryption_key)
     from app.db.tenant_repo import insert_tenant
     insert_tenant(
         tenant_id="demo",
@@ -2588,7 +2588,7 @@ def test_webhook_invalid_signature_returns_401(client):
     response = client.post(
         "/webhook/whatsapp/demo",
         content=body,
-        headers={"Content-Type": "application/json", "X-Wablas-Signature": "bad"},
+        headers={"Content-Type": "application/json", "X-Fonnte-Signature": "bad"},
     )
     assert response.status_code == 401
 
@@ -2605,22 +2605,22 @@ def test_webhook_missing_signature_returns_401(client):
 
 def test_webhook_tenant_not_found_returns_404(client):
     body = b'{"phone":"+6281234567890","message":"halo"}'
-    signature = _sign(body, "wablas-secret-key")
+    signature = _sign(body, "fonnte-secret-key")
     response = client.post(
         "/webhook/whatsapp/unknown-tenant",
         content=body,
-        headers={"Content-Type": "application/json", "X-Wablas-Signature": signature},
+        headers={"Content-Type": "application/json", "X-Fonnte-Signature": signature},
     )
     assert response.status_code == 404
 
 
 def test_webhook_malformed_payload_returns_422(client):
     body = b"not-json"
-    signature = _sign(body, "wablas-secret-key")
+    signature = _sign(body, "fonnte-secret-key")
     response = client.post(
         "/webhook/whatsapp/demo",
         content=body,
-        headers={"Content-Type": "application/json", "X-Wablas-Signature": signature},
+        headers={"Content-Type": "application/json", "X-Fonnte-Signature": signature},
     )
     assert response.status_code == 422
 
@@ -2629,8 +2629,8 @@ def test_webhook_valid_signature_returns_200(client):
     body = b'{"phone":"+6281234567890","message":"berapa harga?"}'
 
     # Mock the graph clients
-    fake_wablas = MagicMock()
-    fake_wablas.send_message = AsyncMock(return_value={"status": "ok"})
+    fake_fonnte = MagicMock()
+    fake_fonnte.send_message = AsyncMock(return_value={"status": "ok"})
 
     fake_sheets = MagicMock()
     fake_sheets.lookup_faq = MagicMock(
@@ -2640,7 +2640,7 @@ def test_webhook_valid_signature_returns_200(client):
     fake_llm = MagicMock()
     fake_llm.classify = MagicMock(return_value={"intent": "faq", "confidence": 0.9})
 
-    with patch("app.webhook.WablasClient", return_value=fake_wablas), \
+    with patch("app.webhook.FonnteClient", return_value=fake_fonnte), \
          patch("app.webhook.GoogleSheetsClient", return_value=fake_sheets), \
          patch("app.webhook.ClaudeHaikuClient", return_value=fake_llm), \
          patch("app.webhook.get_compiled_graph") as mock_get_graph:
@@ -2648,17 +2648,17 @@ def test_webhook_valid_signature_returns_200(client):
         compiled = build_graph(
             llm_client=fake_llm,
             sheets_client=fake_sheets,
-            wablas_client=fake_wablas,
+            fonnte_client=fake_fonnte,
         )
         mock_get_graph.return_value = compiled
 
-        signature = _sign(body, "wablas-secret-key")
+        signature = _sign(body, "fonnte-secret-key")
         response = client.post(
             "/webhook/whatsapp/demo",
             content=body,
             headers={
                 "Content-Type": "application/json",
-                "X-Wablas-Signature": signature,
+                "X-Fonnte-Signature": signature,
             },
         )
         assert response.status_code == 200
@@ -2673,13 +2673,13 @@ Expected: FAIL with `ModuleNotFoundError`
 - [ ] **Step 4: Implement `app/webhook.py`**
 
 ```python
-"""Webhook endpoint for Wablas WhatsApp messages."""
+"""Webhook endpoint for Fonnte WhatsApp messages."""
 import logging
 from typing import Any
 
 from fastapi import APIRouter, Header, HTTPException, Path, Request
 
-from app.auth.signature import SignatureError, verify_wablas_signature
+from app.auth.signature import SignatureError, verify_fonnte_signature
 from app.config import get_settings
 from app.db.tenant_repo import get_tenant
 from app.services.crypto import decrypt_api_key
@@ -2697,9 +2697,9 @@ router = APIRouter()
 async def webhook_whatsapp(
     request: Request,
     tenant_id: str = Path(...),
-    x_wablas_signature: str | None = Header(default=None),
+    x_fonnte_signature: str | None = Header(default=None),
 ):
-    """Receive a WhatsApp message from Wablas, verify signature, run LangGraph."""
+    """Receive a WhatsApp message from Fonnte, verify signature, run LangGraph."""
     raw_body = await request.body()
 
     # 1. Load tenant
@@ -2717,12 +2717,12 @@ async def webhook_whatsapp(
         raise HTTPException(status_code=500, detail="Internal config error")
 
     # 3. Verify signature
-    if not x_wablas_signature:
+    if not x_fonnte_signature:
         raise HTTPException(status_code=401, detail="Missing signature header")
 
     try:
-        valid = verify_wablas_signature(
-            signature_header=x_wablas_signature,
+        valid = verify_fonnte_signature(
+            signature_header=x_fonnte_signature,
             request_body=raw_body,
             secret=wa_api_key,
         )
@@ -2749,22 +2749,22 @@ async def webhook_whatsapp(
     from app.graph.graph import build_graph
     from app.services.llm import ClaudeHaikuClient
     from app.services.sheets import GoogleSheetsClient
-    from app.services.wablas import WablasClient
+    from app.services.fonnte import FonnteClient
 
     llm = ClaudeHaikuClient(api_key=settings.anthropic_api_key)
     sheets = GoogleSheetsClient(
         credentials_json_path=settings.google_sheets_credentials_json_path,
         spreadsheet_id=tenant["google_sheet_id"],
     )
-    wablas = WablasClient(
-        base_url=settings.wablas_base_url,
+    fonnte = FonnteClient(
+        base_url=settings.fonnte_base_url,
         api_key=wa_api_key,
     )
 
     graph = build_graph(
         llm_client=llm,
         sheets_client=sheets,
-        wablas_client=wablas,
+        fonnte_client=fonnte,
     )
 
     thread_id = f"{tenant_id}:{phone}"
@@ -2783,7 +2783,7 @@ async def webhook_whatsapp(
             extra={"tenant_id": tenant_id, "error": str(e)},
             exc_info=True,
         )
-        # Still return 200 to Wablas — we tried
+        # Still return 200 to Fonnte — we tried
         return {"status": "error", "detail": str(e)}
 
     return {"status": "ok"}
@@ -2958,7 +2958,7 @@ Find:
 graph = build_graph(
     llm_client=llm,
     sheets_client=sheets,
-    wablas_client=wablas,
+    fonnte_client=fonnte,
 )
 ```
 
@@ -2967,7 +2967,7 @@ Replace with:
 graph = build_graph(
     llm_client=llm,
     sheets_client=sheets,
-    wablas_client=wablas,
+    fonnte_client=fonnte,
 )
 
 # Attach SQLite checkpointer for multi-turn state persistence
@@ -2987,12 +2987,12 @@ Update `app/graph/graph.py` `build_graph()` function signature:
 
 Find:
 ```python
-def build_graph(llm_client, sheets_client, wablas_client):
+def build_graph(llm_client, sheets_client, fonnte_client):
 ```
 
 Replace with:
 ```python
-def build_graph(llm_client, sheets_client, wablas_client, checkpointer=None):
+def build_graph(llm_client, sheets_client, fonnte_client, checkpointer=None):
 ```
 
 And inside, find `return g.compile()` and replace with:
@@ -3015,7 +3015,7 @@ Update to import `get_checkpointer` and pass it:
 graph = build_graph(
     llm_client=llm,
     sheets_client=sheets,
-    wablas_client=wablas,
+    fonnte_client=fonnte,
     checkpointer=get_checkpointer(),
 )
 ```
@@ -3079,7 +3079,7 @@ Usage:
         --tenant demo \\
         --sheet-id YOUR_GOOGLE_SHEET_ID \\
         --wa-number +6281234567890 \\
-        --api-key YOUR_WABLAS_API_KEY
+        --api-key YOUR_FONNTE_API_KEY
 """
 import argparse
 import base64
@@ -3099,7 +3099,7 @@ def main() -> int:
     parser.add_argument(
         "--wa-number", required=True, help="Owner WhatsApp number (e.g. +6281234567890)"
     )
-    parser.add_argument("--api-key", required=True, help="Wablas API key (will be encrypted)")
+    parser.add_argument("--api-key", required=True, help="Fonnte API key (will be encrypted)")
     parser.add_argument(
         "--payment-provider", default="xendit", help="Payment provider (reserved for Fase 2)"
     )
@@ -3163,7 +3163,7 @@ Step-by-step guide to get OrderCloser Lite running on your local machine.
 
 - Python 3.11+
 - ngrok (free) — https://ngrok.com/download
-- Wablas account (free trial) — https://wablas.com
+- Fonnte account (free trial) — https://fonnte.com
 - Anthropic API key — https://console.anthropic.com
 - Google Cloud project with Sheets API enabled
 
@@ -3187,7 +3187,7 @@ Edit `.env` and fill in:
 
 ```bash
 ANTHROPIC_API_KEY=sk-ant-your-key-here
-WABLAS_BASE_URL=https://api.wablas.com
+FONNTE_BASE_URL=https://api.fonnte.com
 GOOGLE_SHEETS_CREDENTIALS_JSON_PATH=./secrets/sheets-sa.json
 ```
 
@@ -3211,13 +3211,13 @@ Copy the output (e.g., `ENCRYPTION_KEY=base64string==`) into `.env`.
 8. Open your Google Sheet → Share → paste the service account email → give Editor access
 9. Make sure your sheet has tabs named `Katalog`, `FAQ` (Order_Log reserved for Fase 2)
 
-## Step 5: Setup Wablas Webhook
+## Step 5: Setup Fonnte Webhook
 
-1. Login to https://wablas.com
+1. Login to https://fonnte.com
 2. Get your device ID and API key from dashboard
 3. Configure webhook URL (use ngrok — see Step 6):
    `https://<your-ngrok-url>/webhook/whatsapp/demo`
-4. Note Wablas signature verification header name in their docs (typically `X-Wablas-Signature`)
+4. Note Fonnte signature verification header name in their docs (typically `X-Fonnte-Signature`)
 
 ## Step 6: Run with ngrok
 
@@ -3232,7 +3232,7 @@ In terminal 2:
 ngrok http 8000
 ```
 
-Copy the `https://...ngrok-free.app` URL into your Wablas webhook config.
+Copy the `https://...ngrok-free.app` URL into your Fonnte webhook config.
 
 ## Step 7: Seed Tenant
 
@@ -3241,12 +3241,12 @@ python scripts/seed_tenant.py \
     --tenant demo \
     --sheet-id <your-google-sheet-id-from-url> \
     --wa-number +6281234567890 \
-    --api-key <your-wablas-api-key>
+    --api-key <your-fonnte-api-key>
 ```
 
 ## Step 8: Test
 
-Send a WhatsApp message to your Wablas-connected number. Check logs:
+Send a WhatsApp message to your Fonnte-connected number. Check logs:
 
 ```bash
 # Terminal 1 logs should show:
@@ -3264,7 +3264,7 @@ pytest -v
 
 **"Tenant not found"** — run `python scripts/seed_tenant.py` again.
 
-**"Invalid signature"** — verify Wablas webhook secret matches what you seeded.
+**"Invalid signature"** — verify Fonnte webhook secret matches what you seeded.
 
 **"Encryption key invalid"** — regenerate with `python scripts/gen_encryption_key.py`.
 
@@ -3311,7 +3311,7 @@ Expected: `OK`
 
 ```bash
 git add .
-git commit -m "feat: OrderCloser Lite Fase 1 MVP — webhook, LangGraph, fallback, Wablas"
+git commit -m "feat: OrderCloser Lite Fase 1 MVP — webhook, LangGraph, fallback, Fonnte"
 ```
 
 ---
@@ -3319,7 +3319,7 @@ git commit -m "feat: OrderCloser Lite Fase 1 MVP — webhook, LangGraph, fallbac
 ## Open Items Resolved During Implementation
 
 During Task 13, this plan needs additional verification:
-1. **Wablas exact signature header name** — confirm from Wablas docs at implementation time. The plan uses `X-Wablas-Signature` as default; update `app/webhook.py` if different.
+1. **Fonnte exact signature header name** — confirm from Fonnte docs at implementation time. The plan uses `X-Fonnte-Signature` as default; update `app/webhook.py` if different.
 2. **LangGraph SqliteSaver API** — verify `from_conn_string()` vs `SqliteSaver(connection)`. The plan assumes LangGraph 1.x API as documented at https://langchain-ai.github.io/langgraph/.
 3. **Sheets service account email sharing** — user must do this step manually per `docs/setup.md` Step 4.
 

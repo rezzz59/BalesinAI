@@ -17,8 +17,8 @@ Implementasi Fase 1 MVP dari PRD `OrderCloser_Lite_PRD_Final.md`: webhook WhatsA
 ## 2. Goals & Non-Goals
 
 ### Goals
-- Webhook Wablas → 200 OK dalam <10 detik (sesuai PRD §3)
-- Signature verification WAJIB sebelum masuk graph (sesuai PRD §2)
+- Webhook Fonnte → 200 OK dalam <10 detik (sesuai PRD §3)
+- Bearer token auth WAJIB sebelum masuk graph (sesuai PRD §2)
 - Intent classification dengan Claude Haiku, threshold confidence tunggal
 - Multi-turn stateful via SQLite checkpointer
 - Fallback ke owner WAJIB aktif sejak MVP (bukan fase terpisah)
@@ -37,21 +37,21 @@ Implementasi Fase 1 MVP dari PRD `OrderCloser_Lite_PRD_Final.md`: webhook WhatsA
 
 | Komponen | Tanggung Jawab | Bekerja dengan |
 |----------|----------------|----------------|
-| **FastAPI app** | Menerima HTTP POST webhook, return 200 OK | Wablas (HTTP), signature verifier |
-| **Auth/Signature** | Verifikasi Wablas signature header sebelum masuk graph | Wablas header, `tenant_repo` |
+| **FastAPI app** | Menerima HTTP POST webhook, return 200 OK | Fonnte (HTTP), Bearer token verifier |
+| **Auth/Signature** | Verifikasi Fonnte Bearer token sebelum masuk graph | Fonnte `Authorization` header, `tenant_repo` |
 | **Tenant Repo** | Load konfigurasi tenant (wa_api_key encrypted, google_sheet_id, owner_wa_number) | SQLite `tenant_config` |
-| **LangGraph Orchestrator** | State graph: classify → lookup → compose → send, atau fallback | Claude Haiku, Sheets, Wablas |
+| **LangGraph Orchestrator** | State graph: classify → lookup → compose → send, atau fallback | Claude Haiku, Sheets, Fonnte |
 | **SQLite Checkpointer** | Persistensi state percakapan per thread (tenant_id + wa_number) | LangGraph runtime (see `app/db/checkpoints.py`) |
 | **Chat Log Repo** | Catat hasil percakapan (intent, confidence, response, status) | SQLite `chat_log` |
-| **Services Layer** | LLM (Claude Haiku), Sheets (katalog/FAQ), Wablas (send), Crypto | External APIs |
+| **Services Layer** | LLM (Claude Haiku), Sheets (katalog/FAQ), Fonnte (send), Crypto | External APIs |
 
 ### Alur Pesan (End-to-End)
 
 ```
-Wablas ─POST──> /webhook/whatsapp/{tenant_id}
+Fonnte ─POST──> /webhook/whatsapp/{tenant_id}
                        │
                        ▼
-              [signature verifier] ── invalid ──> 401
+              [Bearer token verifier] ── invalid ──> 401
                        │ valid
                        ▼
               [load tenant_config]
@@ -63,7 +63,7 @@ Wablas ─POST──> /webhook/whatsapp/{tenant_id}
        ┌───────────────┼───────────────┐
        ▼               ▼               ▼
  classify_intent   lookup_catalog   fallback_human
- (Claude Haiku)    (Google Sheets)  (Wablas ke owner)
+ (Claude Haiku)    (Google Sheets)  (Fonnte ke owner)
        │               │
        └──── compose_reply ────> send_whatsapp
                                        │
@@ -71,13 +71,13 @@ Wablas ─POST──> /webhook/whatsapp/{tenant_id}
                               [chat_log insert]
                                        │
                                        ▼
-                                  200 OK ke Wablas
+                                  200 OK ke Fonnte
 ```
 
 ### Prinsip Pemisahan
 
-- **Inbound** (webhook → graph) dan **outbound** (graph → Wablas) dipisah biar tidak saling tunggu
-- Wablas webhook dibalas `200 OK` segera setelah graph selesai
+- **Inbound** (webhook → graph) dan **outbound** (graph → Fonnte) dipisah biar tidak saling tunggu
+- Fonnte webhook dibalas `200 OK` segera setelah graph selesai
 - Semua external API call di-boundary `services/` — domain logic tidak pernah import SDK eksternal langsung
 
 ## 4. Tech Stack & Deployment
@@ -90,7 +90,7 @@ Wablas ─POST──> /webhook/whatsapp/{tenant_id}
 | LLM | Claude Haiku (`claude-haiku-4-5`) | Murah, cepat, cukup untuk klasifikasi |
 | Database | SQLite | MVP volume rendah, sesuai PRD §7 |
 | Checkpointer | In-house `SqliteCheckpointer` (see `app/db/checkpoints.py`) | Persistensi state percakapan per thread |
-| WA Provider | Wablas | Signature verification sesuai standar PRD §2; free trial 15 hari + tier gratis |
+| WA Provider | Fonnte | Bearer token auth sesuai standar PRD §2; paid tier dengan API key |
 | Sheets | gspread (service account) | Standard library untuk Google Sheets API |
 | Encryption | `cryptography` (AES-GCM 256-bit) | Enkripsi `wa_api_key` at rest |
 | Hosting | Local + ngrok | Modal $0 untuk MVP |
@@ -159,13 +159,13 @@ Setelah `lookup_catalog` selesai, semua flow lewat `compose_reply` → `send_wha
 - Kalau intent=confirm_order, compose khusus dengan placeholder "owner akan follow up" (payment link di Fase 2)
 
 **`send_whatsapp`**
-- POST ke Wablas API: `/api/v2/send-message`
+- POST ke Fonnte API: `/send`
 - Pakai `wa_api_key` (decrypted) dari tenant_config
 - Retry 3x dengan exponential backoff kalau 5xx
 
 **`fallback_human`**
 - Ambil `owner_wa_number` dari tenant_config
-- Forward pesan asli pembeli ke owner via Wablas (wajib, sesuai PRD §3)
+- Forward pesan asli pembeli ke owner via Fonnte (wajib, sesuai PRD §3)
 - Kirim auto-reply singkat ke pembeli: "Sedang kami cek, owner akan follow up ya 🙏" (default UX, configurable via prompt template di `graph/prompts.py`)
 - Set `status="fallback"` di chat_log
 
@@ -223,13 +223,13 @@ Wajib ada tab:
 
 ### `POST /webhook/whatsapp/{tenant_id}`
 
-Headers (dari Wablas):
+Headers (dari Fonnte):
 ```
-X-Wablas-Signature: <hmac_sha256>
+Authorization: <fonnte_api_key>
 Content-Type: application/json
 ```
 
-Body (Wablas format):
+Body (Fonnte format):
 ```json
 {
   "phone": "+6281234567890",
@@ -251,18 +251,17 @@ Response codes:
 
 ## 8. Security
 
-1. **Webhook signature verification** (wajib, sebelum apa-apa):
+1. **Bearer token auth** (wajib, sebelum apa-apa):
    ```python
-   expected = hmac.new(
-       tenant.wa_api_key.encode(),
-       request.body,
-       sha256
-   ).hexdigest()
-   if not hmac.compare_digest(expected, request.headers["X-Wablas-Signature"]):
+   auth_header = request.headers.get("Authorization", "")
+   if not auth_header.startswith("Bearer "):
+       return 401
+   provided_token = auth_header[7:]
+   if provided_token != settings.fonnte_api_key:
        return 401
    ```
-   - HMAC SHA-256, constant-time compare
-   - Key Wablas = `wa_api_key` decrypted dari DB
+   - Bearer token comparison via constant-time string compare
+   - Token Fonnte = `FONNTE_API_KEY` env var (server-side)
 
 2. **Encryption at rest** untuk `wa_api_key_encrypted`:
    - Algoritma: AES-GCM (256-bit)
@@ -286,7 +285,7 @@ Response codes:
 ```bash
 # Required
 ANTHROPIC_API_KEY=sk-ant-...
-WABLAS_BASE_URL=https://api.wablas.com
+FONNTE_API_KEY=<your_fonnte_api_key>
 GOOGLE_SHEETS_CREDENTIALS_JSON_PATH=./secrets/sheets-sa.json
 
 # Encryption
@@ -310,10 +309,10 @@ INTENT_CONFIDENCE_THRESHOLD=0.6
 | Tenant not found | 404 | Log, alert owner manual |
 | LLM timeout (>5s) | 200 + fallback | Mark `status="error"`, fallback_human |
 | Sheets API error | 200 + fallback | Mark `status="error"`, fallback_human |
-| Wablas send fail | 200 + log error | Retry 3x; kalau gagal mark `status="error"` |
+| Fonnte send fail | 200 + log error | Retry 3x; kalau gagal mark `status="error"` |
 | DB write fail | 200 + log error | Continue, alert (chat_log is best-effort) |
 
-**Prinsip**: selalu return 200 OK ke Wablas kalau request sudah tervalidasi, biar Wablas tidak retry spam. Error internal kita handle via fallback ke owner.
+**Prinsip**: selalu return 200 OK ke Fonnte kalau request sudah tervalidasi, biar Fonnte tidak retry spam. Error internal kita handle via fallback ke owner.
 
 ## 11. Project Structure
 
@@ -327,7 +326,7 @@ ordercloser-lite/
 │   ├── config.py                # pydantic-settings, baca .env
 │   ├── auth/
 │   │   ├── __init__.py
-│   │   └── signature.py         # verify_wablas_signature()
+│   │   └── signature.py         # verify_fonnte_bearer_token()
 │   ├── graph/
 │   │   ├── __init__.py
 │   │   ├── state.py             # ChatState TypedDict
@@ -338,7 +337,7 @@ ordercloser-lite/
 │   │   ├── __init__.py
 │   │   ├── llm.py               # ClaudeHaikuClient (intent classify)
 │   │   ├── sheets.py            # GoogleSheetsClient (FAQ/Katalog)
-│   │   ├── wablas.py            # WablasClient (send_message)
+│   │   ├── fonnte.py            # FonnteGateway (send_message)
 │   │   └── crypto.py            # encrypt/decrypt API keys
 │   └── db/
 │       ├── __init__.py
@@ -382,13 +381,13 @@ ordercloser-lite/
 | `test_webhook.py` | Happy path; 404 tenant; 401 signature; 422 payload |
 | `test_classify.py` | Mock Haiku return; cek routing ke node berikutnya |
 | `test_lookup.py` | Mock Sheets return FAQ/Katalog; cek cache TTL |
-| `test_fallback.py` | confidence < 0.6 → fallback; intent="unclear" → fallback; Wablas send ke owner dipanggil |
+| `test_fallback.py` | confidence < 0.6 → fallback; intent="unclear" → fallback; Fonnte send ke owner dipanggil |
 | `test_crypto.py` | encrypt/decrypt round-trip; tampered ciphertext raise |
 
 **Mocking strategy**:
 - LLM: stub `services.llm.ClaudeHaikuClient.classify`
 - Sheets: stub `services.sheets.GoogleSheetsClient.read_range`
-- Wablas: stub `services.wablas.WablasClient.send_message`
+- Fonnte: stub `services.fonnte.FonnteGateway.send_message`
 - DB: SQLite in-memory per test
 - No network calls during tests
 
@@ -404,12 +403,12 @@ cp .env.example .env
 
 # Seed tenant
 python scripts/gen_encryption_key.py
-python scripts/seed_tenant.py --tenant demo --sheet-id <id> --wa-number <owner> --api-key <wablas-key>
+python scripts/seed_tenant.py --tenant demo --sheet-id <id> --wa-number <owner> --api-key <fonnte-key>
 
 # Run dev
 uvicorn app.main:app --reload --port 8000
 
-# Expose ke Wablas
+# Expose ke Fonnte
 ngrok http 8000
 
 # Test
@@ -424,7 +423,7 @@ mypy app/
 
 | Risk | Mitigation |
 |------|------------|
-| Wablas downtime | Retry 3x backoff; fallback_human tetap jalan (log error) |
+| Fonnte downtime | Retry 3x backoff; fallback_human tetap jalan (log error) |
 | LLM quota habis | Threshold confidence < 0.6 = fallback otomatis |
 | SQLite corrupt | Backup mingguan via cron (manual untuk MVP) |
 | Encryption key bocor | Rotate key + decrypt-reencrypt semua `wa_api_key_encrypted` |
@@ -433,12 +432,12 @@ mypy app/
 
 ## 15. Open Questions / TBD
 
-- [ ] **Wablas exact signature header**: docs perlu dicek saat implementation (`X-Wablas-Signature` atau nama lain). **TBD** — akan dikonfirmasi via Wablas docs sebelum coding, dan dimasukan ke `verify_wablas_signature()` dengan header name sebagai parameter.
+- [ ] **Fonnte Bearer token format**: docs perlu dicek saat implementation (header `Authorization: <token>` raw, atau `Authorization: Bearer <token>`). **TBD** — akan dikonfirmasi via Fonnte docs sebelum coding, dan dimasukan ke `verify_fonnte_bearer_token()` dengan header parsing yang sesuai.
 - [ ] **Google Sheets service account setup**: user perlu buat service account di Google Cloud Console & share sheet ke email SA. Akan dibuat setup guide terpisah di `docs/setup.md`.
 
 ## 16. References
 
 - PRD: `OrderCloser_Lite_PRD_Final.md`
-- Wablas docs: https://wablas.com/docs
+- Fonnte docs: https://api.fonnte.com
 - LangGraph 1.x docs: https://langchain-ai.github.io/langgraph/
 - Claude Haiku: https://docs.anthropic.com/en/docs/about-claude/models
