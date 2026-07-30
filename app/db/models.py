@@ -1,7 +1,7 @@
 """SQLAlchemy ORM models."""
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, Float, Index, Integer, String, Text
+from sqlalchemy import DateTime, Float, Index, Integer, LargeBinary, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -63,3 +63,29 @@ class Checkpoint(Base):
     )
 
     __table_args__ = (Index("idx_config_fnode", "config_key", "fnode_id"),)
+
+
+class EmbeddingCache(Base):
+    """Cached embedding for FAQ, product catalog, or policy rows. Enables fast
+    semantic lookups without re-computing embeddings on every query.
+
+    Each row stores: the source type + unique identifier, content hash, and a 384-dim
+    float32 vector stored as BLOB. All rows are L2-normalized, so cosine similarity
+    equals dot product.
+    """
+
+    __tablename__ = "embedding_cache"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    source: Mapped[str] = mapped_column(String, nullable=False, index=True)  # 'faq'|'policy'|'catalog'
+    row_id: Mapped[str] = mapped_column(String, nullable=False, index=True)  # unique key within source
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)  # SHA-256 of text
+    embedding: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)  # 384 x float32 = 1536 bytes
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow, nullable=False)
+
+    __table_args__ = (
+        Index("idx_embedding_lookup", "tenant_id", "source", "content_hash"),
+        Index("idx_embedding_source", "tenant_id", "source", "row_id"),
+    )

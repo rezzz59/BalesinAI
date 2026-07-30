@@ -1,4 +1,5 @@
 """Database layer — SQLAlchemy models and repos."""
+from app.db.embeddings_repo import EmbeddingCacheRepo, get_embedding_repo, CachedEmbedding  # noqa: F401, F403
 from app.db.engine import get_engine
 from app.db.models import Base
 
