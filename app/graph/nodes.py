@@ -4,6 +4,7 @@ from typing import Any
 
 from app.graph.state import ChatState
 from app.services.llm import LLMError, LLMValidationError, validate_reply
+from app.services.semantic_search import SemanticSearchClient, SemanticSearchError
 from app.services.sheets import FAQ_MATCH_THRESHOLD, _score_faq_row
 
 logger = logging.getLogger(__name__)
@@ -13,7 +14,7 @@ def _to_match_kind(score: float) -> str:
     """Bucket an overlap score into high/medium/none for downstream grading.
 
     Uses thresholds (0.5 high, otherwise >0 medium) so a 1/2 overlap (0.5)
-    counts as a high-confidence FAQ match �� appropriate when the buyer asks a
+    counts as a high-confidence FAQ match Ⲉ appropriate when the buyer asks a
     short, specific question.
     """
     if score >= 0.5:
@@ -23,34 +24,109 @@ def _to_match_kind(score: float) -> str:
     return "none"
 
 
+def fallback_reason_for(state: ChatState, threshold: float | None = None) -> str | None:
+    """Derive a fallback_reason code from state, or None if no fallback applies.
+
+    Priority order:
+      1. complaint_signal — buyer escalation/escalation risk
+      2. unclear — intent not classifiable
+      3. low_confidence — below intent_confidence_threshold
+      4. no_faq_match — FAQ lookup returned nothing (intent=faq)
+      5. no_product_match — product lookup returned nothing (intent=check_product)
+
+    Only one reason per call. Higher-priority reason wins.
+    """
+    from app.config import get_settings
+
+    if threshold is None:
+        threshold = get_settings().intent_confidence_threshold
+
+    if state.get("has_complaint_signal"):
+        return "complaint_signal"
+    if state.get("intent") == "unclear":
+        return "unclear"
+    if state.get("confidence", 0.0) < threshold:
+        return "low_confidence"
+
+    intent = state.get("intent")
+    if intent == "faq" and not state.get("catalog_answer"):
+        return "no_faq_match"
+    if intent == "check_product" and not state.get("product_match"):
+        return "no_product_match"
+
+    return None
+
+
 def classify_intent(state: ChatState, llm_client: Any) -> dict:
     """Classify user message into one of 4 intents.
 
-    Returns dict update for state: {intent, confidence}
+    Considers conversation history (state["messages"]) so intent can be inferred
+    from multi-turn context, not just the latest message.
+
+    Returns dict update for state: {intent, confidence, has_complaint_signal, sentiment}
     Raises LLMError if classification fails (caller decides whether to fallback).
+
+    Empty/whitespace-only messages are handled here by setting intent to "unclear"
+    and high confidence fallback.
     """
+    # Handle empty/whitespace-only messages early
+    message = state.get("message_text", "") or ""
+    stripped_message = message.strip()
+    if not stripped_message:
+        logger.warning(
+            "empty_message_detected",
+            extra={
+                "tenant_id": state["tenant_id"],
+                "thread_id": state["thread_id"],
+            },
+        )
+        # Classify as unclear intent to trigger fallback via should_fallback
+        return {
+            "intent": "unclear",
+            "confidence": 1.0,  # confident it's unclear
+            "has_complaint_signal": False,
+            "sentiment": "neutral",
+        }
+
     try:
-        result = llm_client.classify(state["message_text"])
+        # Pass full conversation history so LLM can leverage multi-turn context
+        messages = state.get("messages") or []
+        result = llm_client.classify_with_history(messages)
         logger.info(
             "intent_classified",
             extra={
                 "tenant_id": state["tenant_id"],
                 "intent": result["intent"],
                 "confidence": result["confidence"],
+                "has_complaint_signal": result.get("has_complaint_signal", False),
+                "history_turns": len(messages),
             },
         )
-        return {"intent": result["intent"], "confidence": result["confidence"]}
+        return {
+            "intent": result["intent"],
+            "confidence": result["confidence"],
+            "has_complaint_signal": result.get("has_complaint_signal", False),
+            "sentiment": result.get("sentiment", "neutral"),
+        }
     except LLMError as e:
         logger.error("intent_classification_failed", extra={"error": str(e)})
         raise
 
 
-def lookup_catalog(state: ChatState, sheets_client: Any) -> dict:
-    """Lookup answer in Sheets based on intent.
+def lookup_catalog(
+    state: ChatState,
+    sheets_client: Any,
+    semantic_search_client: SemanticSearchClient | None = None,
+) -> dict:
+    """Lookup answer in Sheets based on intent, with optional semantic boost.
 
     For intent=faq: call sheets_client.lookup_faq() and grade the match.
-    For intent=check_product: call sheets_client.read_catalog() and pick the
-        best-scoring product above FAQ_MATCH_THRESHOLD.
+    For intent=check_product: read catalog via sheets_client.read_catalog(),
+        then optionally narrow candidates with semantic_search_client. If no
+        semantic client is provided, fall back to scanning every product with
+        _score_faq_row. The candidate with the highest lexical overlap above
+        FAQ_MATCH_THRESHOLD is returned.
+
     Returns dict update: {catalog_answer, product_match, match_kind} or empty
     dict if no match.
     """
@@ -62,12 +138,12 @@ def lookup_catalog(state: ChatState, sheets_client: Any) -> dict:
             if match is None:
                 logger.info(
                     "faq_no_match",
-                    extra={"tenant_id": state["tenant_id"], "thread_id": state["thread_id"]},
+                    extra={
+                        "tenant_id": state["tenant_id"],
+                        "thread_id": state["thread_id"],
+                    },
                 )
                 return {}
-            # Re-score the winning row so we can grade match_kind for downstream
-            # validation. _score_faq_row is O(1) for a single row (tokenize +
-            # set intersection), negligible overhead vs the lookup's full scan.
             score = _score_faq_row(state["message_text"], match)
             return {
                 "catalog_answer": match["jawaban"],
@@ -78,11 +154,42 @@ def lookup_catalog(state: ChatState, sheets_client: Any) -> dict:
         if intent == "check_product":
             products = sheets_client.read_catalog()
             message = state["message_text"]
+
+            # Optionally narrow candidate set via semantic search. If it fails
+            # or returns no row_ids we can map, fall back to the full product
+            # list so behaviour degrades gracefully.
+            candidates = products
+            if semantic_search_client is not None:
+                try:
+                    hits = semantic_search_client.search(
+                        message,
+                        tenant_id=state["tenant_id"],
+                        source="catalog",
+                        limit=3,
+                    )
+                except SemanticSearchError as e:
+                    logger.warning(
+                        "semantic_search_failed",
+                        extra={
+                            "tenant_id": state["tenant_id"],
+                            "error": str(e),
+                        },
+                    )
+                    hits = []
+
+                if hits:
+                    row_ids = {hit["row_id"] for hit in hits}
+                    semantic_candidates = [
+                        p
+                        for p in products
+                        if str(p.get("id") or p.get("nama_produk")) in row_ids
+                    ]
+                    if semantic_candidates:
+                        candidates = semantic_candidates
+
             best_product: dict | None = None
             best_score = 0.0
-            for product in products:
-                # Combine nama_produk + deskripsi for matching; numeric/ready
-                # columns add noise to scoring.
+            for product in candidates:
                 combined = " ".join(
                     str(product.get(k) or "")
                     for k in ("nama_produk", "deskripsi")
@@ -124,13 +231,19 @@ def lookup_catalog(state: ChatState, sheets_client: Any) -> dict:
     except Exception as e:  # noqa: BLE001
         logger.error(
             "sheets_lookup_failed",
-            extra={"tenant_id": state["tenant_id"], "error": str(e)},
+            extra={
+                "tenant_id": state["tenant_id"],
+                "error": str(e),
+            },
         )
         return {}
 
 
 def compose_reply(state: ChatState, llm_client: Any) -> dict:
     """Compose reply text. Dispatches to LLM (via _compose_with_llm) or fallback path.
+
+    Incorporates conversation history for context-aware responses.
+    Updates state["messages"] with the assistant's reply after composition.
 
     Returns {reply_text, action} (action ∈ "reply" | "fallback" | "order").
     """
@@ -152,6 +265,7 @@ def _compose_with_llm(state: ChatState, llm_client: Any) -> dict:
     # browse list from lookup_catalog), return it verbatim — no LLM round-trip,
     # no risk of hallucination on multi-row output.
     if state.get("reply_text") and state.get("action") == "reply":
+        # Note: reply already has LLM content; we'll append to messages after send
         return {"reply_text": state["reply_text"], "action": "reply"}
 
     intent = state["intent"]
@@ -161,14 +275,21 @@ def _compose_with_llm(state: ChatState, llm_client: Any) -> dict:
     # when lookup returned nothing (e.g., match_kind == "none").
     retrieved_row = _build_retrieved_row(state)
 
+    # Get optional customer context for composing context-aware replies
+    customer_context = state.get("customer_context")
+
     # 1. Order confirmation: short template, no LLM.
     if intent == "confirm_order":
+        reply = (
+            "Terima kasih ordernya! Owner akan follow up untuk konfirmasi "
+            "pembayaran ya 🙏"
+        )
+        # Append user message to history, then add assistant reply
+        messages = state.get("messages", []) or []
         return {
-            "reply_text": (
-                "Terima kasih ordernya! Owner akan follow up untuk konfirmasi "
-                "pembayaran ya 🙏"
-            ),
+            "reply_text": reply,
             "action": "order",
+            "messages": messages + [{"role": "user", "content": state["message_text"]}, {"role": "assistant", "content": reply}],
         }
 
     message = state["message_text"]
@@ -182,13 +303,24 @@ def _compose_with_llm(state: ChatState, llm_client: Any) -> dict:
     for attempt in range(2):
         try:
             message_for_call = message if attempt == 0 else f"{message}{strict_hint}"
-            reply = llm_client.compose_reply(
+            reply = llm_client.compose_reply_with_history(
+                messages=state.get("messages", []) or [],
                 message=message_for_call,
                 retrieved_row=retrieved_row,
                 match_kind=match_kind,
+                customer_context=customer_context,  # Pass customer context for context-aware replies
             )
             validate_reply(reply, retrieved_row)
-            return {"reply_text": reply, "action": "reply"}
+            # Append to conversation history before returning
+            messages = (state.get("messages", []) or []) + [
+                {"role": "user", "content": message},
+                {"role": "assistant", "content": reply},
+            ]
+            return {
+                "reply_text": reply,
+                "action": "reply",
+                "messages": messages,
+            }
         except LLMValidationError as e:
             logger.warning(
                 "compose_validation_failed",
@@ -231,10 +363,18 @@ def _build_retrieved_row(state: ChatState) -> dict | None:
 
 
 def _verbatim_fallback(state: ChatState) -> dict:
-    """Today's degraded-mode reply: build a reply directly from source row values."""
+    """Today's degraded-mode reply: build a reply directly from source row values.
+
+    Wraps the raw FAQ answer in a polite, owner-handoff sentence so the buyer
+    isn't left staring at an unattributed fragment of catalog text.
+    """
     if state.get("catalog_answer"):
         return {
-            "reply_text": f"{state['catalog_answer']}",
+            "reply_text": (
+                f"Halo Kak, kami catat dulu ya 🙏\n\n"
+                f"{state['catalog_answer']}\n\n"
+                f"Untuk detail yang lebih spesifik, kami akan forward ke owner ya Kak."
+            ),
             "action": "reply",
         }
     if state.get("product_match"):
@@ -253,7 +393,7 @@ def _verbatim_fallback(state: ChatState) -> dict:
 
 def _compose_fallback_message(state: ChatState, reason: str) -> dict:
     return {
-        "reply_text": "Sedang kami cek, owner akan follow up ya 🙏",
+        "reply_text": "Sedang kami cek, owner will follow up ya 🙏",
         "action": "fallback",
         "fallback_reason": reason,
     }
@@ -278,8 +418,13 @@ def _format_browse_reply(products: list[dict]) -> str:
         family = _extract_family(nama)
         families.setdefault(family, []).append(p)
 
+    MAX_FAMILIES = 8
+    family_names = sorted(families)
+    shown = family_names[:MAX_FAMILIES]
+    hidden = len(family_names) - len(shown)
+
     lines = ["Ini lineup yang ready ya kak 😊", ""]
-    for family in sorted(families):
+    for family in shown:
         variants = families[family]
         prices = [int(v.get("harga")) for v in variants if str(v.get("harga", "")).isdigit()]
         sample = variants[0].get("nama_produk", "-")
@@ -292,11 +437,12 @@ def _format_browse_reply(products: list[dict]) -> str:
             f"- {family}: {len(variants)} varian ready "
             f"(contoh: {sample}, {price_range})"
         )
+    if hidden > 0:
+        lines.append(f"- (+{hidden} kategori lain, sebut aja yang Kakak cari)")
     total = len(products)
     lines.append("")
     lines.append(
-        f"Total ada {total} varian ready kak. Mau lihat per-varian warna/ukuran? "
-        f"Atau langsung sebut aja nama produknya 😊"
+        f"Total ada {total} varian ready. Sebut aja nama produknya ya kak 😊"
     )
     return "\n".join(lines)
 
@@ -360,13 +506,17 @@ async def fallback_human(state: ChatState, gateway_client: Any) -> dict:
     Uses duck typing: client must have send_message(phone, message) method.
     Raises PhoneGatewayException if there's an error after retries.
 
-    Caller MUST have already set fallback_reason before calling.
+    If fallback_reason is not yet on state, derives it via fallback_reason_for().
     Returns {} on success, {action: "error"} on failure.
     """
     from app.services.phone_gateway import PhoneGatewayException  # Local import to avoid circular deps
 
     # Need owner_wa_number — but it's not in ChatState. Read from tenant repo.
     from app.db.tenant_repo import get_tenant
+
+    fallback_reason = state.get("fallback_reason") or fallback_reason_for(state) or "n/a"
+    sentiment = state.get("sentiment", "neutral")
+    result: dict = {"action": "fallback", "fallback_reason": fallback_reason}
 
     tenant = get_tenant(state["tenant_id"])
     if tenant is None:
@@ -380,7 +530,8 @@ async def fallback_human(state: ChatState, gateway_client: Any) -> dict:
         f"[FALLBACK] Pesan dari {state['wa_number']}:\n\n{state['message_text']}\n\n"
         f"Intent: {state.get('intent', 'n/a')}\n"
         f"Confidence: {state.get('confidence', 'n/a')}\n"
-        f"Reason: {state.get('fallback_reason', 'n/a')}"
+        f"Sentiment: {sentiment}\n"
+        f"Reason: {fallback_reason}"
     )
 
     try:
@@ -399,10 +550,11 @@ async def fallback_human(state: ChatState, gateway_client: Any) -> dict:
             extra={
                 "tenant_id": state["tenant_id"],
                 "thread_id": state["thread_id"],
-                "reason": state.get("fallback_reason"),
+                "reason": fallback_reason,
+                "sentiment": sentiment,
             },
         )
-        return {}
+        return result
     except PhoneGatewayException as e:
         logger.error("fallback_send_failed", extra={"error": str(e)})
         return {"action": "error"}

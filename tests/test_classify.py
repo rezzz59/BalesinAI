@@ -17,7 +17,7 @@ def test_classify_intent_writes_intent_and_confidence():
     }
 
     fake_llm = MagicMock()
-    fake_llm.classify = MagicMock(return_value={"intent": "faq", "confidence": 0.85})
+    fake_llm.classify_with_history = MagicMock(return_value={"intent": "faq", "confidence": 0.85})
 
     result = classify_intent(state, llm_client=fake_llm)
 
@@ -34,7 +34,7 @@ def test_classify_intent_low_confidence_returns_unclear():
     }
 
     fake_llm = MagicMock()
-    fake_llm.classify = MagicMock(return_value={"intent": "faq", "confidence": 0.3})
+    fake_llm.classify_with_history = MagicMock(return_value={"intent": "faq", "confidence": 0.3})
 
     result = classify_intent(state, llm_client=fake_llm)
 
@@ -52,7 +52,7 @@ def test_classify_intent_llm_error_raises():
     }
 
     fake_llm = MagicMock()
-    fake_llm.classify = MagicMock(side_effect=LLMError("timeout"))
+    fake_llm.classify_with_history = MagicMock(side_effect=LLMError("timeout"))
 
     with pytest.raises(LLMError):
         classify_intent(state, llm_client=fake_llm)

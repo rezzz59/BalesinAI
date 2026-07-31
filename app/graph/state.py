@@ -14,9 +14,14 @@ class ChatState(TypedDict, total=False):
     message_text: str
     timestamp: datetime
 
+    # Conversation history (for multi-turn context)
+    messages: list[dict[str, str]]  # [{"role": "user|assistant", "content": str}, ...]
+
     # Classify output
     intent: Intent
     confidence: float
+    has_complaint_signal: bool
+    sentiment: Literal["positive", "neutral", "negative"]
 
     # Lookup output
     catalog_answer: str | None
@@ -25,6 +30,9 @@ class ChatState(TypedDict, total=False):
 
     # Compose output
     reply_text: str
+
+    # Context analysis output (from analyze_customer_context)
+    customer_context: dict | None  # {mapped_conditions, issue_type, primary_intent, confidence, reasoning}
 
     # Final action
     action: Action

@@ -35,9 +35,15 @@ def test_compose_reply_faq_no_match_triggers_fallback():
 
     class _Fail(LLMClient):
         def classify(self, message):
-            return {"intent": "faq", "confidence": 0.5}
+            return {"intent": "faq", "confidence": 0.5, "has_complaint_signal": False, "sentiment": "neutral"}
 
-        def compose_reply(self, message, retrieved_row, match_kind):
+        def classify_with_history(self, messages):
+            return {"intent": "faq", "confidence": 0.5, "has_complaint_signal": False, "sentiment": "neutral"}
+
+        def compose_reply(self, message, retrieved_row, match_kind, customer_context=None):
+            raise LLMError("down")
+
+        def compose_reply_with_history(self, messages, message, retrieved_row, match_kind, customer_context=None):
             raise LLMError("down")
 
     result = compose_reply(state, llm_client=_Fail())
@@ -85,7 +91,8 @@ async def test_fallback_human_sends_to_owner_and_buyer():
     with patch("app.db.tenant_repo.get_tenant", fake_tenant_repo.get_tenant):
         result = await fallback_human(state, gateway_client=fake_gateway)
 
-    assert result == {}
+    assert result["action"] == "fallback"
+    assert result["fallback_reason"] == "unclear"
     # Two calls: owner + buyer
     assert fake_gateway.send_message.call_count == 2
     owner_call = fake_gateway.send_message.call_args_list[0]

@@ -8,6 +8,12 @@ from sentence_transformers import SentenceTransformer
 
 DEFAULT_MODEL = "paraphrase-multilingual-MiniLM-L12-v2"
 
+
+class EmbeddingServiceError(Exception):
+    """Raised when embedding generation fails."""
+
+    pass
+
 _service: "EmbeddingService | None" = None
 
 
@@ -30,8 +36,15 @@ class EmbeddingService:
 
     def embed_text(self, text: str) -> np.ndarray:
         """Return normalized 384-d float32 vector."""
-        vec = self.model.encode(text, normalize_embeddings=True)
-        return vec.astype(np.float32)
+        try:
+            vec = self.model.encode(text, normalize_embeddings=True)
+            return vec.astype(np.float32)
+        except Exception as e:
+            raise EmbeddingServiceError(f"embedding failed: {e}") from None
+
+    def encode(self, text: str) -> np.ndarray:
+        """Alias of embed_text (used by SemanticSearchClient)."""
+        return self.embed_text(text)
 
     def cosine_similarity(self, a: np.ndarray, b: np.ndarray) -> float:
         """Cosine similarity for two unit-norm vectors is just their dot product."""

@@ -3,15 +3,17 @@ import json
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any, Optional, Tuple
 
-from fastapi import FastAPI, HTTPException, Request, status
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.config import get_settings
 from app.db import init_db  # Ensure DB tables are created
 from app.db.checkpointer import SqliteCheckpointer
+from app.db.tenant_repo import get_tenant  # Get tenant config from DB
+from app.db.models import TenantConfig
 from app.graph.graph import (
     build_graph,
     reset_compiled_graph_for_testing,
@@ -21,10 +23,13 @@ from app.services.llm import (
     AnthropicLLMClient,
     GeminiLLMClient,
     LLMError,
+    get_llm_client,
+    MockLLMClient,
 )
 from app.services.sheets import GoogleSheetsClient
 from app.services.phone_gateway import PhoneGatewayException
 from app.services.fonnte import FonnteGateway, FonnteError
+from app.services.crypto import decrypt_api_key
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -54,98 +59,71 @@ app.add_middleware(
 )
 
 
-# --- Client Initialization ---
-_llm_client: Optional[Any] = None
-_sheets_client: Optional[Any] = None
-_phone_gateway: Optional[Any] = None
-_checkpointer: Any = None  # LangGraph saver (e.g., SqliteCheckpointer)
-_compiled_graph: Any = None
+# --- Global cached clients per tenant ---
+_cached_clients: dict[str, Tuple[Any, Any, Any]] = {}  # tenant_id -> (llm, sheets, gateway)
 
 
-def _create_llm_client():
-    """Create LLM client, falling back to MockLLMClient if real SDK is unavailable."""
-    from app.services.llm import get_llm_client, MockLLMClient, LLMError
-
-    settings = get_settings()
-    backend = (settings.llm_backend or "gemini").lower()
+def _get_tenant_clients(tenant_id: str, config: TenantConfig, settings: "Settings") -> Tuple[Any, Any, Any]:
+    """Get or create LLM, Sheets, and Gateway clients for a specific tenant.
+    Caches clients by tenant ID for reuse across requests.
+    """
+    if tenant_id in _cached_clients:
+        return _cached_clients[tenant_id]
 
     try:
-        return get_llm_client()
+        # 1. Get/create LLM client
+        llm_client = get_llm_client()
     except (ImportError, ModuleNotFoundError, LLMError) as e:
-        logger.warning(f"Real LLM client initialization failed: {e}. Using MockLLMClient for testing.")
-        return MockLLMClient()
+        logger.warning(f"LLM init failed for tenant {tenant_id}: {e}. Using mock.")
+        llm_client = MockLLMClient()
 
-
-def _create_sheets_client():
-    settings = get_settings()
-    if not settings.google_sheets_credentials_json_path:
-        raise RuntimeError("GOOGLE_SHEETS_CREDENTIALS_JSON_PATH not set")
-    if not settings.google_sheets_spreadsheet_id:
-        # In a real deployment, this would be per-tenant from DB; for default usage take from env or warn
-        logger.warning("GOOGLE_SHEETS_SPREADSHEET_ID not set - using placeholder ID only for testing")
-    return GoogleSheetsClient(
+    # 2. Create Sheets client with tenant's Google Sheet ID
+    sheets_client = GoogleSheetsClient(
         credentials_json_path=settings.google_sheets_credentials_json_path,
-        spreadsheet_id=settings.google_sheets_spreadsheet_id or "placeholder-sheet-id",
+        spreadsheet_id=config.google_sheet_id,
     )
 
+    # 3. Create Fonnte gateway with tenant's decrypted API key
+    enc_key = settings.encryption_key
+    wa_api_key = decrypt_api_key(config.wa_api_key_encrypted, enc_key)
+    gateway = FonnteGateway(api_key=wa_api_key)
 
-def _create_phone_gateway():
-    """Build the WhatsApp gateway (Fonnte).
-
-    The factory previously branched on `settings.whatsapp_gateway` (fonnte vs wablas).
-    As of the gateway-collapse refactor, only Fonnte is supported; Wablas has been
-    removed. Future gateway additions should extend this factory with explicit
-    per-gateway credential validation.
-
-    Raises:
-        RuntimeError if FONNTE_API_KEY is not configured.
-    """
-    settings = get_settings()
-    fonnte_key = settings.fonnte_api_key
-    if not fonnte_key:
-        raise RuntimeError("FONNTE_API_KEY not configured")
-    return FonnteGateway(api_key=fonnte_key)
+    clients = (llm_client, sheets_client, gateway)
+    _cached_clients[tenant_id] = clients
+    logger.info(f"Clients initialized for tenant {tenant_id}", extra={"sheets_id": config.google_sheet_id})
+    return clients
 
 
-def _ensure_clients():
-    global _llm_client, _sheets_client, _phone_gateway, _checkpointer, _compiled_graph
-    try:
-        if _llm_client is None:
-            _llm_client = _create_llm_client()
-            logger.info(
-                "llm_client_initialized",
-                extra={"backend": getattr(_llm_client, "backend", "unknown")},
-            )
-    except Exception as e:
-        logger.error("llm_client_init_failed", exc_info=True)
-        _llm_client = None  # Menandai failure
-    try:
-        if _sheets_client is None:
-            _sheets_client = _create_sheets_client()
-            logger.info("sheets_client_initialized")
-    except Exception as e:
-        logger.error("sheets_client_init_failed", exc_info=True)
-        _sheets_client = None
-    try:
-        if _phone_gateway is None:
-            _phone_gateway = _create_phone_gateway()
-            gateway_type = type(_phone_gateway).__name__
-            logger.info(f"{gateway_type}_client_initialized")
-    except Exception as e:
-        logger.error("phone_gateway_init_failed", exc_info=True)
-        _phone_gateway = None
-    if _checkpointer is None:
-        _checkpointer = SqliteCheckpointer()
-        logger.info("init_checkpointer", extra={"info": "SQLite-backed checkpointer ready"})
-    if _compiled_graph is None:
-        try:
-            _compiled_graph = build_graph(
-                _llm_client, _sheets_client, _phone_gateway, checkpointer=_checkpointer
-            )
-            logger.info("graph_compiled", extra={"status": "ready"})
-        except Exception as e:
-            logger.error("graph_build_failed", exc_info=True)
-            raise RuntimeError(f"Failed to compile graph: {e}") from e
+def _reset_tenant_clients(tenant_id: str | None = None):
+    """Reset cached clients. If tenant_id is specified, only clear that one; else clear all."""
+    if tenant_id is None:
+        _cached_clients.clear()
+    elif tenant_id in _cached_clients:
+        del _cached_clients[tenant_id]
+
+
+# --- Auth helper ---
+AUTH_TOKEN = get_settings().webhook_auth_token  # Secret key for webhook protection
+
+
+def validate_webhook_authorization(request: Request) -> bool:
+    """Verify webhook authorization header against global secret."""
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        return False
+    provided_token = auth_header[7:]
+    return provided_token == AUTH_TOKEN
+
+
+# --- Endpoint decorators for tenant extraction ---
+def extract_tenant_id_from_request(request: Request) -> str:
+    """Extract tenant ID from request headers or body (fallback to 'default')."""
+    # Prefer X-Tenant-ID header
+    tenant_id = request.headers.get("X-Tenant-ID")
+    if tenant_id:
+        return tenant_id
+    # Fallback to body parsing
+    return "default"  # This will be overridden in actual webhook handling
 
 
 # --- API Endpoints ---
@@ -153,43 +131,44 @@ def _ensure_clients():
 
 @app.post("/webhook/whatsapp/")
 async def whatsapp_webhook(request: Request):
-    """Webhook endpoint for incoming WhatsApp messages with signature verification."""
-    # Get raw request body for signature verification
+    """Webhook endpoint for incoming tenant-specific WhatsApp messages.
+
+    Requires Bearer token authentication (global webhook secret).
+    Tenant ID comes from X-Tenant-ID header (or 'tenant_id' field in payload).
+    """
+    # 1. Validate webhook authorization
+    if not validate_webhook_authorization(request):
+        raise HTTPException(status_code=401, detail="Invalid or missing webhook token")
+
+    # 2. Parse JSON payload
     try:
         raw_body = await request.body()
-    except Exception:
-        raise HTTPException(status_code=400, detail="Unable to read request body")
-
-    # Parse JSON data separately
-    try:
         data = json.loads(raw_body.decode("utf-8"))
-    except json.JSONDecodeError:
+    except Exception:
         raise HTTPException(status_code=400, detail="Invalid JSON payload")
 
-    # Get API key for auth verification (Fonnte only)
-    settings = get_settings()
-    fonnte_api_key = settings.fonnte_api_key or ""
-    if not fonnte_api_key:
-        raise HTTPException(
-            status_code=500, detail="FONNTE_API_KEY not configured on server"
-        )
-    # Fonnte uses Bearer token auth
-    auth_header = request.headers.get("Authorization", "")
-    if not auth_header.startswith("Bearer "):
-        raise HTTPException(
-            status_code=401,
-            detail="Missing Bearer Authorization header",
-        )
-    provided_token = auth_header[7:]
-    if provided_token != fonnte_api_key:
-        raise HTTPException(status_code=401, detail="Invalid Fonnte API key")
+    # 3. Extract tenant ID (X-Tenant-ID header takes priority)
+    tenant_id = (
+        request.headers.get("X-Tenant-ID")
+        or data.get("tenant_id")
+        or "default"
+    )
 
-    tenant_id = data.get("tenant_id", "default")
+    # 4. Look up tenant configuration from DB
+    settings = get_settings()
+    tenant_record = get_tenant(tenant_id)
+    if not tenant_record:
+        logger.warning("tenant_not_found", extra={"tenant_id": tenant_id})
+        raise HTTPException(
+            status_code=404,
+            detail=f"Tenant '{tenant_id}' not configured. Use /admin/tenants to create.",
+        )
+
+    # 5. Validate request payload fields
     wa_number = data.get("wa_number", "")
     thread_id = data.get("thread_id", "")
     message_text = data.get("message_text", "")
 
-    # Validate required fields
     missing = []
     if not wa_number:
         missing.append("wa_number")
@@ -203,8 +182,7 @@ async def whatsapp_webhook(request: Request):
             detail=f"Missing required fields: {', '.join(missing)}",
         )
 
-    _ensure_clients()
-
+    # 6. Create tenant-specific state
     state: ChatState = {
         "tenant_id": tenant_id,
         "wa_number": wa_number,
@@ -213,14 +191,33 @@ async def whatsapp_webhook(request: Request):
         "timestamp": datetime.now(),
     }
 
+    # 7. Build/get tenant-specific graph and run
     try:
-        # Run graph - uses async nodes (ainvoke)
-        result = await _compiled_graph.ainvoke(state)
+        llm_client, sheets_client, gateway = _get_tenant_clients(tenant_id, tenant_record, settings)
+
+        # Initialize checkpointer (shared across tenants for thread persistence)
+        global _checkpointer
+        if _checkpointer is None:
+            _checkpointer = SqliteCheckpointer()
+            logger.info("init_checkpointer", extra={"info": "SQLite-backed checkpointer ready"})
+
+        # Build per-tenant graph
+        graph = build_graph(
+            llm_client, sheets_client, gateway, checkpointer=_checkpointer
+        )
+        logger.info("graph_compiled", extra={"status": "ready", "tenant": tenant_id})
+
+        # Run graph with tenant-specific state
+        result = await graph.ainvoke(state)
         logger.info(
             "webhook_processed",
-            extra={"thread_id": state.get("thread_id"), "intent": result.get("intent")},
+            extra={
+                "thread_id": state.get("thread_id"),
+                "intent": result.get("intent"),
+                "tenant": tenant_id,
+            },
         )
-        return {"status": "ok", "state": result}
+        return {"status": "ok", "state": result, "tenant_id": tenant_id}
     except LLMError:
         logger.error("llm_error", exc_info=True)
         raise HTTPException(status_code=500, detail="Language service unavailable")
@@ -232,32 +229,40 @@ async def whatsapp_webhook(request: Request):
         raise HTTPException(status_code=500, detail="Internal error")
 
 
+# Global tenant-specific graph objects (reinitialized per tenant on first use)
+_checkpointer: Any = None  # LangGraph saver
+_compiled_graph: Any = None  # Per-tenant graph instance
+
+
 @app.get("/health")
 async def health_check():
-    _ensure_clients()
+    """Health check endpoint. Returns service status and tenant cache info."""
+    settings = get_settings()
     return {
         "status": "healthy",
-        "clients_ready": all([_llm_client, _sheets_client, _phone_gateway]),
-        "graph_compiled": _compiled_graph is not None,
+        "module": "order-closer-lite",
+        "version": "0.1.0",
+        "tenant_count": len(_cached_clients),
+        "database": "sqlite" if getattr(settings, "db_path", None) else "not configured",
+        "sheets_spreadsheet_id": settings.google_sheets_spreadsheet_id or "unset",
+        "webhook_auth_set": bool(AUTH_TOKEN) and AUTH_TOKEN != "",
     }
 
 
-# Helper for tests / dev — reset compiled graph so injected mocks take effect.
-# Loopback-only: not exposed to network callers (Bypass via tunneling still works
-# for legit local testing, but the endpoint cannot be reached from external IPs).
-@app.post("/debug/reset-graph/")
-async def debug_reset_graph(request: Request):
+# Helper for tests / dev — reset cached tenants and compiled graph so injected mocks take effect.
+# Loopback-only: not exposed to network callers.
+@app.post("/debug/reset-all/")
+async def debug_reset_all(request: Request):
     client_host = request.client.host if request.client else None
     if client_host not in {"127.0.0.1", "::1", "localhost", None}:
         raise HTTPException(status_code=403, detail="Forbidden")
     reset_compiled_graph_for_testing()
-    global _llm_client, _sheets_client, _phone_gateway, _checkpointer, _compiled_graph
-    _llm_client = None
-    _sheets_client = None
-    _phone_gateway = None
+    global _cached_clients, _checkpointer, _compiled_graph
+    _cached_clients.clear()
     _checkpointer = None
     _compiled_graph = None
-    return {"status": "graph reset"}
+    logger.info("debug_reset_all: all caches and graphs cleared")
+    return {"status": "reset_all"}
 
 
 __all__ = ["app"]
