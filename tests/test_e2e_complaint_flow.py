@@ -135,7 +135,7 @@ def test_e2e_customer_context_is_propagated():
         "google_sheet_id": "sheet-abc", "payment_provider": "xendit",
         "owner_wa_number": "+628111111",
     }), patch("app.graph.nodes.SemanticSearchClient.from_defaults") as mock_semantic:
-        mock_semantic.return_value = MagicMock(search=lambda **kwargs: [])
+        mock_semantic.return_value = MagicMock(search=lambda *a, **kw: [])
         state: ChatState = {
             "tenant_id": "test_tenant",
             "wa_number": "+6281234567890",
@@ -177,7 +177,7 @@ def test_order_confirmation_shortcuts_llm():
         "google_sheet_id": "sheet-abc", "payment_provider": "xendit",
         "owner_wa_number": "+628111111",
     }), patch("app.graph.nodes.SemanticSearchClient.from_defaults") as mock_semantic:
-        mock_semantic.return_value = MagicMock(search=lambda **kwargs: [])
+        mock_semantic.return_value = MagicMock(search=lambda *a, **kw: [])
         state: ChatState = {
             "tenant_id": "test_tenant",
             "wa_number": "+6281234567890",
@@ -251,7 +251,7 @@ def test_empty_catalog_faq_lookup():
         "google_sheet_id": "sheet-abc", "payment_provider": "xendit",
         "owner_wa_number": "+628111111",
     }), patch("app.graph.nodes.SemanticSearchClient.from_defaults") as mock_semantic:
-        mock_semantic.return_value = MagicMock(search=lambda **kwargs: [])
+        mock_semantic.return_value = MagicMock(search=lambda *a, **kw: [])
         state: ChatState = {
             "tenant_id": "test_tenant",
             "wa_number": "+6281234567890",
@@ -324,7 +324,7 @@ def test_multi_turn_garansi_then_product():
         "google_sheet_id": "sheet-abc", "payment_provider": "xendit",
         "owner_wa_number": "+628111111",
     }), patch("app.services.semantic_search.SemanticSearchClient.from_defaults") as mock_semantic:
-        mock_semantic.return_value = MagicMock(search=lambda **kwargs: [])
+        mock_semantic.return_value = MagicMock(search=lambda *a, **kw: [])
 
         # First turn: garansi — should get proper faq reply from catalog
         state1: ChatState = {
@@ -367,7 +367,7 @@ def test_empty_message_handling():
         "google_sheet_id": "sheet-abc", "payment_provider": "xendit",
         "owner_wa_number": "+628111111",
     }), patch("app.graph.nodes.SemanticSearchClient.from_defaults") as mock_semantic:
-        mock_semantic.return_value = MagicMock(search=lambda **kwargs: [])
+        mock_semantic.return_value = MagicMock(search=lambda *a, **kw: [])
 
         state: ChatState = {
             "tenant_id": "test_tenant",
@@ -394,7 +394,7 @@ def test_long_message_handling():
         "google_sheet_id": "sheet-abc", "payment_provider": "xendit",
         "owner_wa_number": "+628111111",
     }), patch("app.graph.nodes.SemanticSearchClient.from_defaults") as mock_semantic:
-        mock_semantic.return_value = MagicMock(search=lambda **kwargs: [])
+        mock_semantic.return_value = MagicMock(search=lambda *a, **kw: [])
 
         state: ChatState = {
             "tenant_id": "test_tenant",
@@ -426,7 +426,7 @@ def test_message_with_only_special_characters():
         "google_sheet_id": "sheet-abc", "payment_provider": "xendit",
         "owner_wa_number": "+628111111",
     }), patch("app.graph.nodes.SemanticSearchClient.from_defaults") as mock_semantic:
-        mock_semantic.return_value = MagicMock(search=lambda **kwargs: [])
+        mock_semantic.return_value = MagicMock(search=lambda *a, **kw: [])
 
         for msg in special_messages:
             state: ChatState = {
@@ -458,7 +458,7 @@ def test_long_message_handling():
         "google_sheet_id": "sheet-abc", "payment_provider": "xendit",
         "owner_wa_number": "+628111111",
     }), patch("app.graph.nodes.SemanticSearchClient.from_defaults") as mock_semantic:
-        mock_semantic.return_value = MagicMock(search=lambda **kwargs: [])
+        mock_semantic.return_value = MagicMock(search=lambda *a, **kw: [])
 
         state: ChatState = {
             "tenant_id": "test_tenant",
@@ -495,9 +495,10 @@ def test_multi_turn_complaint_then_followup():
         "google_sheet_id": "sheet-abc", "payment_provider": "xendit",
         "owner_wa_number": "+628111111",
     }), patch("app.graph.nodes.SemanticSearchClient.from_defaults") as mock_semantic:
-        mock_semantic.return_value = MagicMock(search=lambda **kwargs: [])
+        mock_semantic.return_value = MagicMock(search=lambda *a, **kw: [])
 
-        # First turn: complaint
+        # First turn: complaint — classified with complaint signal → routed to
+        # fallback_human (owner handoff), NOT compose/reply.
         state1: ChatState = {
             "tenant_id": "test_tenant",
             "wa_number": "+6281234567890",
@@ -506,7 +507,7 @@ def test_multi_turn_complaint_then_followup():
             "message_history": [],
         }
         result1 = graph.invoke(state1)
-        assert result1.get("action") == "reply"
+        assert result1.get("action") == "fallback"
 
         # Second turn: follow-up about replacement process
         state2: ChatState = {
@@ -518,9 +519,10 @@ def test_multi_turn_complaint_then_followup():
                                {"role": "assistant", "content": result1.get("reply_text", "")}],
         }
         result2 = graph.invoke(state2)
-        # Customer context should have been populated from first turn analysis
-        assert len(captured_contexts) >= 2, f"At least one customer context, got {len(captured_contexts)}"
-        assert captured_contexts[1] is not None, "Second turn should have customer_context from first"
+        # Customer context should be populated on the follow-up turn (turn 1
+        # went to fallback_human, which does not run analyze_customer_context).
+        assert len(captured_contexts) >= 1, f"At least one customer context, got {len(captured_contexts)}"
+        assert captured_contexts[0] is not None, "Second turn should have customer_context"
         assert result2.get("action") == "reply"
 
 
@@ -559,7 +561,7 @@ def test_multi_turn_order_shortcut():
         "google_sheet_id": "sheet-abc", "payment_provider": "xendit",
         "owner_wa_number": "+628111111",
     }), patch("app.graph.nodes.SemanticSearchClient.from_defaults") as mock_semantic:
-        mock_semantic.return_value = MagicMock(search=lambda **kwargs: [])
+        mock_semantic.return_value = MagicMock(search=lambda *a, **kw: [])
 
         state: ChatState = {
             "tenant_id": "test_tenant",

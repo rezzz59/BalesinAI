@@ -89,8 +89,15 @@ def classify_intent(state: ChatState, llm_client: Any) -> dict:
         }
 
     try:
-        # Pass full conversation history so LLM can leverage multi-turn context
-        messages = state.get("messages") or []
+        # Pass full conversation history so LLM can leverage multi-turn context.
+        # Ensure the current message is part of the history — on turn 1 the
+        # history starts empty, and without the current message some backends
+        # (AdaCode) would receive an empty request.
+        messages = [m for m in (state.get("messages") or []) if isinstance(m, dict)]
+        current_message = state.get("message_text", "")
+        if current_message:
+            if not messages or messages[-1].get("content") != current_message:
+                messages = messages + [{"role": "user", "content": current_message}]
         result = llm_client.classify_with_history(messages)
         logger.info(
             "intent_classified",
@@ -573,8 +580,56 @@ def write_chat_log(state: ChatState) -> dict:
             confidence=state.get("confidence"),
             response=state.get("reply_text"),
             fallback_reason=state.get("fallback_reason"),
-            status=state.get("action", "error"),
+            user_message=state.get("message_text"),
+            status=state.get("action") or "error",
         )
     except Exception as e:  # noqa: BLE001
         logger.error("chat_log_insert_failed", extra={"error": str(e)})
     return {}
+
+def _compose_faq_with_llm(state: ChatState, llm_client: Any) -> dict:
+    """Compose friendly FAQ reply using LLM.
+    
+    Takes the raw FAQ answer and rephrases it to be warm, natural, and conversational.
+    """
+    faq_answer = state.get("catalog_answer", "")
+    user_message = state.get("message_text", "")
+    
+    if not faq_answer:
+        return _compose_fallback_message(state, reason="no_faq_data")
+    
+    try:
+        # Build prompt for friendly response
+        prompt = f"""Kamu adalah asisten chatbot ramah untuk klinik. Ubah jawaban FAQ ini menjadi respons yang:
+- Ramah dan hangat (gunakan sapaan seperti "Halo Kak", "Selamat siang")
+- Natural dan conversational, tidak kaku seperti template
+- Menggunakan emoji yang sesuai
+- Tetap informatif dan akurat
+- Singkat (2-4 kalimat)
+
+Pertanyaan user: {user_message}
+Jawaban FAQ: {faq_answer}
+
+Contoh gaya respons yang baik:
+"Halo Kak! 😊 Klinik kami buka setiap hari Senin-Sabtu pukul 08.00-21.00 ya Kak. Untuk hari Minggu buka 09.00-17.00. Bisa datang langsung atau booking via WhatsApp dulu biar gak antri! 🙏"
+
+Respons yang baik:"""
+
+        reply = llm_client.generate(prompt, temperature=0.7)
+        return {
+            "reply_text": reply.strip(),
+            "action": "reply",
+            "intent": "faq",
+            "confidence": 1.0,
+        }
+    except Exception as e:
+        logger.warning(f"LLM FAQ composition failed: {e}, using fallback")
+    
+    # Fallback: polite wrapper
+    return {
+        "reply_text": f"Halo Kak! 😊\n\n{faq_answer}\n\nKalau ada yang mau ditanyakan lagi, Kakak bisa chat kami ya! 🙏",
+        "action": "reply",
+        "intent": "faq",
+        "confidence": 1.0,
+    }
+

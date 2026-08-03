@@ -15,6 +15,7 @@ def insert_chat_log(
     confidence: Optional[float] = None,
     response: Optional[str] = None,
     fallback_reason: Optional[str] = None,
+    user_message: Optional[str] = None,
     timestamp: Optional[datetime] = None,
 ) -> int:
     """Insert a chat log entry. Returns the new row id."""
@@ -27,6 +28,7 @@ def insert_chat_log(
             confidence=confidence,
             response=response,
             fallback_reason=fallback_reason,
+            user_message=user_message,
             status=status,
             timestamp=timestamp or datetime.utcnow(),
         )

@@ -39,6 +39,7 @@ class ChatLog(Base):
     response: Mapped[str | None] = mapped_column(Text, nullable=True)
     fallback_reason: Mapped[str | None] = mapped_column(String, nullable=True)
     status: Mapped[str] = mapped_column(String, nullable=False)
+    user_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     timestamp: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
 
     __table_args__ = (

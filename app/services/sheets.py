@@ -57,6 +57,7 @@ def _score_faq_row(message: str, row: dict) -> float:
     """Overlap ratio: meaningful message words ∩ (row's text fields).
 
     Returns 0.0 if no meaningful words or no overlap. Range: 0.0 .. 1.0.
+    Also gives prefix bonus if the row's question text closely matches the message.
     """
     msg_words = _tokenize_meaningful(message)
     if not msg_words:
@@ -66,7 +67,22 @@ def _score_faq_row(message: str, row: dict) -> float:
     if not row_words:
         return 0.0
     overlap = msg_words & row_words
-    return len(overlap) / len(msg_words)
+    base_score = len(overlap) / len(msg_words)
+
+    # Score bonus based on question-message similarity
+    question = str(row.get('pertanyaan', ''))
+    message_clean = message.lower().strip('?! ')
+    question_lower = question.lower().strip('?! ')
+
+    # Exact match (ignoring punctuation) gets highest priority
+    if message_clean == question_lower:
+        base_score += 0.10  # Extra bonus for exact match
+    # Partial prefix match gets moderate bonus
+    elif question_lower.startswith(message_clean) or message_clean.startswith(question_lower):
+        base_score += 0.05  # Bonus for prefix overlap
+
+    # Don't cap at 1.0 to allow prefix bonus to break ties
+    return base_score
 
 
 class SheetsError(Exception):
@@ -116,8 +132,46 @@ class GoogleSheetsClient:
             try:
                 sheet = self._get_spreadsheet()
                 worksheet = sheet.worksheet(tab_name)
-                rows = worksheet.get_all_records()
-                rows_list = [dict(r) for r in rows]
+
+                # Get all raw values to handle irregular headers
+                raw_rows = worksheet.get_all_values()
+                if not raw_rows:
+                    self._cache[tab_name] = (now, [])
+                    logger.info(
+                        "sheets_read_ok",
+                        extra={"tab": tab_name, "rows": 0},
+                    )
+                    return []
+
+                # Use first row as header, skip empty/duplicate headers
+                header_row = raw_rows[0]
+                # Clean headers: strip whitespace, lowercase (consumers expect
+                # 'pertanyaan'/'jawaban'/'ready'/... regardless of sheet case),
+                # remove empty ones, make unique.
+                headers = []
+                seen = set()
+                for h in header_row:
+                    clean_h = (h or "").strip().lower()
+                    if clean_h and clean_h not in seen:
+                        headers.append(clean_h)
+                        seen.add(clean_h)
+
+                # If no valid headers, use positional access (index-based)
+                if not headers:
+                    headers = [f"col_{i}" for i in range(len(raw_rows[0]))]
+
+                # Convert rows to dict list
+                rows_list = []
+                for row in raw_rows[1:]:
+                    row_dict = {}
+                    for i, val in enumerate(row):
+                        if i < len(headers):
+                            row_dict[headers[i]] = val
+                        else:
+                            # Extra columns beyond headers, store as col_n
+                            row_dict[f"col_{i}"] = val
+                    rows_list.append(row_dict)
+
                 self._cache[tab_name] = (now, rows_list)
                 logger.info(
                     "sheets_read_ok",
@@ -147,14 +201,16 @@ class GoogleSheetsClient:
         with 1-word overlap while a more relevant row with 3-word overlap sat
         below it in the sheet. Iterates through the cached FAQ list, scores
         each row, and returns the row with the highest overlap whose score
-        meets the threshold. On a tie, the first row wins (stable behavior).
+        meets the threshold. On a tie, the row with shorter question text wins
+        (more specific match).
         """
         if not message or not message.strip():
             return None
 
         best_row: dict[str, str] | None = None
         best_score = 0.0
-        for row in self.read_faq():
+        # Scan in reverse order so newer entries win on tie (last matching row wins)
+        for row in reversed(self.read_faq()):
             score = _score_faq_row(message, row)
             if score > best_score:
                 best_score = score

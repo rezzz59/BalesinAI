@@ -1,9 +1,10 @@
 """Abstract LLM client interface and provider implementations."""
 import abc
+import httpx
 import json
 import logging
+import os
 import re
-import httpx
 from typing import Any, TypeAlias
 
 from app.graph.prompts import (
@@ -20,11 +21,14 @@ logger = logging.getLogger(__name__)
 VALID_INTENTS = {"faq", "check_product", "confirm_order", "unclear"}
 VALID_SENTIMENTS = {"positive", "neutral", "negative"}
 ClassificationResult: TypeAlias = dict[str, Any]
-# Keys: intent (str), confidence (float), has_complaint_signal (bool), sentiment (str)
 
 
 class LLMError(Exception):
     """Raised when LLM call fails or returns invalid output."""
+
+
+class LLMValidationError(LLMError):
+    """Raised when LLM-composed reply contains facts not in source row."""
 
 
 class LLMClient(metaclass=abc.ABCMeta):
@@ -36,7 +40,7 @@ class LLMClient(metaclass=abc.ABCMeta):
 
         Raises LLMError if API fails or response is invalid.
         """
-        pass
+        raise LLMError("Empty fallback chain - no clients available")
 
     @abc.abstractmethod
     def classify_with_history(self, messages: list[dict[str, str]]) -> ClassificationResult:
@@ -110,8 +114,8 @@ class MockLLMClient(LLMClient):
         msg = (message or "").lower()
         has_complaint_signal = any(
             kw in msg
-            for kw in ("kecewa", "rusak", "refund", "balik", "gak sampai", "ga做起",
-                       "lama", "kapan sampainya", "komplain", "jelek", "batal")
+            for kw in ("kecewa", "rusak", "refund", "balik", "gak sampai", "belum sampai",
+                       "udah lama", "kapan sampainya", "komplain", "jelek", "batal")
         )
         sentiment = "negative" if has_complaint_signal else "neutral"
         if any(kw in msg for kw in ("stok", "ready", "ada ga", "ada nggak", "ready stock", "tersedia")):
@@ -123,13 +127,11 @@ class MockLLMClient(LLMClient):
         return {"intent": "unclear", "confidence": 0.4, "has_complaint_signal": has_complaint_signal, "sentiment": sentiment}
 
     def classify_with_history(self, messages: list[dict[str, str]]) -> ClassificationResult:
-        """Multi-turn aware classification using latest user message."""
-        if not messages:
-            return self.classify("")
-        for m in messages:
-            if m.get("role") == "user":
-                return self.classify(m["content"])
-        return self.classify("")
+        """Multi-turn aware classification using latest message only."""
+        last_msg = ""
+        if messages and isinstance(messages[-1], dict):
+            last_msg = messages[-1].get("content", "") or ""
+        return self.classify(last_msg)
 
     def compose_reply(
         self,
@@ -138,14 +140,23 @@ class MockLLMClient(LLMClient):
         match_kind: str,
         customer_context: dict | None = None,
     ) -> str:
-        """Compose a single-reply message using retrieved facts."""
-        return self.compose_reply_with_history(
-            messages=[],  # No history for direct compose call
-            message=message,
-            retrieved_row=retrieved_row,
-            match_kind=match_kind,
-            customer_context=customer_context,
+        """Provide a deterministic dummy reply that mirrors source-row facts."""
+        if not retrieved_row:
+            return "Terima kasih! Kami akan membantu Anda segera."
+        if isinstance(retrieved_row, str):
+            return f"Terima kasih telah menghubungi kami. {retrieved_row}"
+        answer = (
+            retrieved_row.get("jawaban")
+            or retrieved_row.get("answer")
+            or retrieved_row.get("stok")
+            or retrieved_row.get("deskripsi")
+            or retrieved_row.get("harga")
+            or retrieved_row.get("price")
+            or ""
         )
+        if answer:
+            return f"Terima kasih telah menghubungi kami. {answer}"
+        return "Terima kasih telah menghubungi kami."
 
     def compose_reply_with_history(
         self,
@@ -155,644 +166,122 @@ class MockLLMClient(LLMClient):
         match_kind: str,
         customer_context: dict | None = None,
     ) -> str:
-        """Compose reply grounded in retrieved_row while preserving multi-turn history."""
-        if retrieved_row:
-            parts = [str(v) for v in retrieved_row.values() if v is not None]
-            base_reply = " ".join(parts) if parts else "Mohon maaf, produk belum tersedia."
-        else:
-            base_reply = "Mohon maaf, produk belum tersedia."
-
-        history_parts = [m["content"] for m in messages if m.get("role") == "user"]
-        if history_parts:
-            context = " | ".join(history_parts)
-            prefix = f"{context}: "
-        else:
-            prefix = ""
-
-        # Incorporate customer context for context-aware reply
-        if customer_context:
-            issue_type = customer_context.get("issue_type", "none")
-            if issue_type != "none":
-                base_reply = f"[{issue_type}] {base_reply}"
-
-        return f"{prefix}{base_reply}"
-
-
-# Attempt to import Anthropic SDK; optional - required only if using Anthropic backend
-try:
-    import anthropic
-except ImportError:
-    anthropic = None  # type: ignore[assignment,misc]
-
-
-class AnthropicLLMClient(LLMClient):
-    """Wraps Anthropic SDK for Claude Haiku intent classification."""
-
-    MODEL = "claude-haiku-4-5"
-
-    def __init__(self, api_key: str):
-        if anthropic is None:
-            raise LLMError("Anthropic SDK is not installed. Install 'anthropic' package to use this backend.")
-        self._client = anthropic.Anthropic(api_key=api_key)
-
-    def classify(self, message: str) -> ClassificationResult:
-        """Classify user message intent."""
-        try:
-            response = self._client.messages.create(
-                model=self.MODEL,
-                max_tokens=128,
-                system=INTENT_CLASSIFICATION_SYSTEM,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": INTENT_CLASSIFICATION_USER.format(message=message),
-                    }
-                ],
-            )
-
-            text_block = next(
-                (b for b in response.content if b.type == "text"),
-                None,
-            )
-            if text_block is None:
-                raise LLMError("No text block in response")
-
-            result = json.loads(text_block.text)
-
-            intent = result.get("intent")
-            confidence = result.get("confidence")
-            has_complaint_signal = result.get("has_complaint_signal", False)
-            sentiment = result.get("sentiment", "neutral")
-
-            if intent not in VALID_INTENTS:
-                raise LLMError(f"Invalid intent from LLM: {intent}")
-            if not isinstance(confidence, (int, float)) or not (0.0 <= confidence <= 1.0):
-                raise LLMError(f"Invalid confidence from LLM: {confidence}")
-            if not isinstance(has_complaint_signal, bool):
-                raise LLMError(f"Invalid has_complaint_signal from LLM: {has_complaint_signal}")
-            if sentiment not in VALID_SENTIMENTS:
-                raise LLMError(f"Invalid sentiment from LLM: {sentiment}")
-
-            return {
-                "intent": intent,
-                "confidence": float(confidence),
-                "has_complaint_signal": has_complaint_signal,
-                "sentiment": sentiment,
-            }
-
-        except json.JSONDecodeError as e:
-            raise LLMError(f"Invalid JSON from LLM: {e}") from e
-        except Exception as e:
-            logger.exception("anthropic_classify failed: %s", e)
-            raise LLMError(f"Anthropic API error: {e}") from e
-
-    def classify_with_history(self, messages: list[dict[str, str]]) -> ClassificationResult:
-        """Multi-turn aware classification using conversation history."""
-        from app.graph.prompts import INTENT_CLASSIFICATION_SYSTEM, INTENT_CLASSIFICATION_USER
-        latest_user_content = ""
-        for m in messages:
-            if m.get("role") == "user":
-                latest_user_content = m["content"]
-        if not latest_user_content:
-            return self.classify("")
-
-        system_message = INTENT_CLASSIFICATION_SYSTEM + "\n\n" + INTENT_CLASSIFICATION_USER.format(message=latest_user_content)
-
-        try:
-            response = self._client.messages.create(
-                model=self.MODEL,
-                max_tokens=128,
-                system=system_message,
-                messages=[{"role": "user", "content": latest_user_content}],
-            )
-            text_block = next((b for b in response.content if b.type == "text"), None)
-            if text_block is None:
-                raise LLMError("No text block in response")
-            result = json.loads(text_block.text)
-
-            intent = result.get("intent")
-            confidence = result.get("confidence")
-            has_complaint_signal = result.get("has_complaint_signal", False)
-            sentiment = result.get("sentiment", "neutral")
-
-            if intent not in VALID_INTENTS:
-                raise LLMError(f"Invalid intent from LLM: {intent}")
-            if not isinstance(confidence, (int, float)) or not (0.0 <= confidence <= 1.0):
-                raise LLMError(f"Invalid confidence from LLM: {confidence}")
-            if not isinstance(has_complaint_signal, bool):
-                raise LLMError(f"Invalid has_complaint_signal from LLM: {has_complaint_signal}")
-            if sentiment not in VALID_SENTIMENTS:
-                raise LLMError(f"Invalid sentiment from LLM: {sentiment}")
-
-            return {
-                "intent": intent,
-                "confidence": float(confidence),
-                "has_complaint_signal": has_complaint_signal,
-                "sentiment": sentiment,
-            }
-
-        except json.JSONDecodeError as e:
-            raise LLMError(f"Invalid JSON from LLM: {e}") from e
-        except Exception as e:
-            logger.exception("anthropic_classify_with_history failed: %s", e)
-            raise LLMError(f"Anthropic API error: {e}") from e
-
-    def compose_reply(
-        self,
-        message: str,
-        retrieved_row: dict | None,
-        match_kind: str,
-        customer_context: dict | None = None,
-    ) -> str:
-        """Compose natural Indonesian reply grounded in retrieved_row."""
-        if match_kind == "none":
-            system = COMPOSE_NOMATCH_SYSTEM
-        elif match_kind == "medium":
-            system = COMPOSE_PARTIAL_SYSTEM
-        else:
-            system = COMPOSE_STRICT_SYSTEM
-
-        if retrieved_row:
-            source_str = " | ".join(f"{k}: {v}" for k, v in retrieved_row.items() if v is not None)
-        else:
-            source_str = "(tidak ada data yang cocok di katalog)"
-
-        user_content = COMPOSE_USER_TEMPLATE.format(message=message, source_row=source_str, match_kind=match_kind, customer_context=customer_context)
-
-        try:
-            response = self._client.messages.create(
-                model=self.MODEL,
-                max_tokens=512,
-                system=system,
-                messages=[{"role": "user", "content": user_content}],
-            )
-            text_block = next((b for b in response.content if b.type == "text"), None)
-            if text_block is None:
-                raise LLMError("No text block in compose response")
-            return text_block.text.strip()
-        except Exception as e:
-            raise LLMError(f"Anthropic compose failed: {e}") from e
-
-    def compose_reply_with_history(
-        self,
-        messages: list[dict[str, str]],
-        message: str,
-        retrieved_row: dict | None,
-        match_kind: str,
-        customer_context: dict | None = None,
-    ) -> str:
-        """Compose reply with full conversation history."""
-        if match_kind == "none":
-            system = COMPOSE_NOMATCH_SYSTEM
-        elif match_kind == "medium":
-            system = COMPOSE_PARTIAL_SYSTEM
-        else:
-            system = COMPOSE_STRICT_SYSTEM
-
-        if retrieved_row:
-            source_str = " | ".join(
-                f"{k}: {v}" for k, v in retrieved_row.items() if v is not None
-            )
-        else:
-            source_str = "(tidak ada data yang cocok di katalog)"
-
-        user = COMPOSE_USER_TEMPLATE.format(
-            message=message,
-            source_row=source_str,
-            match_kind=match_kind,
-            customer_context=customer_context,
-        )
-
-        try:
-            response = self._client.messages.create(
-                model=self.MODEL,
-                max_tokens=512,
-                system=system,
-                messages=[{"role": "user", "content": user}],
-            )
-            text_block = next(
-                (b for b in response.content if b.type == "text"),
-                None,
-            )
-            if text_block is None:
-                raise LLMError("No text block in compose response")
-            return text_block.text.strip()
-        except Exception as e:  # noqa: BLE001
-            raise LLMError(f"Anthropic compose failed: {e}") from e
-
-
-class GeminiLLMClient(LLMClient):
-    """Wraps the new google-genai SDK for Gemini intent classification.
-
-    Uses a readily available model that works with the free tier.
-    To change the model, edit the MODEL constant or pass via env var.
-    """
-
-    MODEL = "gemini-3.1-flash-lite"
-
-    def __init__(self, api_key: str):
-        import google.genai as genai  # noqa: E402 (lazy import; only needed when used)
-
-        self._client = genai.Client(api_key=api_key)
-
-    def classify(self, message: str) -> ClassificationResult:
-        """Classify user message intent using Gemini API."""
-        try:
-            from google.genai import types as genai_types
-
-            response = self._client.models.generate_content(
-                model=self.MODEL,
-                contents=[
-                    INTENT_CLASSIFICATION_SYSTEM
-                    + "\n\n"
-                    + INTENT_CLASSIFICATION_USER.format(message=message)
-                ],
-                config=genai_types.GenerateContentConfig(
-                    temperature=0,
-                    max_output_tokens=128,
-                    response_mime_type="application/json",
-                    response_schema={
-                        "type": "OBJECT",
-                        "properties": {
-                            "intent": {
-                                "type": "STRING",
-                                "enum": ["faq", "check_product", "confirm_order", "unclear"],
-                            },
-                            "confidence": {"type": "NUMBER"},
-                            "has_complaint_signal": {"type": "BOOLEAN"},
-                            "sentiment": {
-                                "type": "STRING",
-                                "enum": ["positive", "neutral", "negative"],
-                            },
-                        },
-                        "required": ["intent", "confidence", "has_complaint_signal", "sentiment"],
-                    },
-                ),
-            )
-
-            text = (response.text or "").strip()
-            logger.warning(f"DEBUG_GEMINI_RESPONSE: {text!r}")  # TEMP DEBUG
-            if not text:
-                raise LLMError("Empty response from Gemini")
-
-            result = json.loads(text)
-            intent = result.get("intent")
-            confidence = result.get("confidence")
-            has_complaint_signal = result.get("has_complaint_signal", False)
-            sentiment = result.get("sentiment", "neutral")
-
-            if intent not in VALID_INTENTS:
-                raise LLMError(f"Invalid intent from LLM: {intent}")
-            if not isinstance(confidence, (int, float)) or not (0.0 <= confidence <= 1.0):
-                raise LLMError(f"Invalid confidence from LLM: {confidence}")
-            if not isinstance(has_complaint_signal, bool):
-                raise LLMError(f"Invalid has_complaint_signal from LLM: {has_complaint_signal}")
-            if sentiment not in VALID_SENTIMENTS:
-                raise LLMError(f"Invalid sentiment from LLM: {sentiment}")
-
-            return {
-                "intent": intent,
-                "confidence": float(confidence),
-                "has_complaint_signal": has_complaint_signal,
-                "sentiment": sentiment,
-            }
-
-        except json.JSONDecodeError as e:
-            raise LLMError(f"Invalid JSON from Gemini: {e}") from e
-        except Exception as e:  # noqa: BLE001
-            logger.exception("gemini_call_failed: %s", e)
-            raise LLMError(f"Gemini API error: {e}") from e
-
-    def classify_with_history(self, messages: list[dict[str, str]]) -> ClassificationResult:
-        """Multi-turn aware classification using conversation history."""
-        from google.genai import types as genai_types
-        latest_user_content = ""
-        for m in messages:
-            if m.get("role") == "user":
-                latest_user_content = m["content"]
-        if not latest_user_content:
-            return self.classify("")
-
-        prompt = INTENT_CLASSIFICATION_SYSTEM + "\n\n" + INTENT_CLASSIFICATION_USER.format(message=latest_user_content)
-
-        try:
-            response = self._client.models.generate_content(
-                model=self.MODEL,
-                contents=[prompt],
-                config=genai_types.GenerateContentConfig(
-                    temperature=0,
-                    max_output_tokens=128,
-                    response_mime_type="application/json",
-                    response_schema={
-                        "type": "OBJECT",
-                        "properties": {
-                            "intent": {"type": "STRING", "enum": ["faq", "check_product", "confirm_order", "unclear"]},
-                            "confidence": {"type": "NUMBER"},
-                            "has_complaint_signal": {"type": "BOOLEAN"},
-                            "sentiment": {"type": "STRING", "enum": ["positive", "neutral", "negative"]},
-                        },
-                        "required": ["intent", "confidence", "has_complaint_signal", "sentiment"],
-                    },
-                ),
-            )
-            text = (response.text or "").strip()
-            logger.warning(f"DEBUG_GEMINI_RESPONSE: {text!r}")  # TEMP DEBUG
-            if not text:
-                raise LLMError("Empty response from Gemini")
-            result = json.loads(text)
-            intent = result.get("intent")
-            confidence = result.get("confidence")
-            has_complaint_signal = result.get("has_complaint_signal", False)
-            sentiment = result.get("sentiment", "neutral")
-
-            if intent not in VALID_INTENTS:
-                raise LLMError(f"Invalid intent from Gemini: {intent}")
-            if not isinstance(confidence, (int, float)) or not (0.0 <= confidence <= 1.0):
-                raise LLMError(f"Invalid confidence from Gemini: {confidence}")
-            if not isinstance(has_complaint_signal, bool):
-                raise LLMError(f"Invalid has_complaint_signal from Gemini: {has_complaint_signal}")
-            if sentiment not in VALID_SENTIMENTS:
-                raise LLMError(f"Invalid sentiment from Gemini: {sentiment}")
-
-            return {
-                "intent": intent,
-                "confidence": float(confidence),
-                "has_complaint_signal": has_complaint_signal,
-                "sentiment": sentiment,
-            }
-
-        except json.JSONDecodeError as e:
-            raise LLMError(f"Invalid JSON from Gemini: {e}") from e
-        except Exception as e:
-            logger.exception("gemini_classify_with_history failed: %s", e)
-            raise LLMError(f"Gemini API error: {e}") from e
-
-    def compose_reply(
-        self,
-        message: str,
-        retrieved_row: dict | None,
-        match_kind: str,
-        customer_context: dict | None = None,
-    ) -> str:
-        """Compose natural Indonesian reply grounded in retrieved_row."""
-        if match_kind == "none":
-            system = COMPOSE_NOMATCH_SYSTEM
-        elif match_kind == "medium":
-            system = COMPOSE_PARTIAL_SYSTEM
-        else:
-            system = COMPOSE_STRICT_SYSTEM
-
-        if retrieved_row:
-            source_str = " | ".join(f"{k}: {v}" for k, v in retrieved_row.items() if v is not None)
-        else:
-            source_str = "(tidak ada data yang cocok di katalog)"
-
-        user_content = COMPOSE_USER_TEMPLATE.format(message=message, source_row=source_str, match_kind=match_kind, customer_context=customer_context)
-
-        try:
-            from google.genai import types as genai_types
-
-            response = self._client.models.generate_content(
-                model=self.MODEL,
-                contents=[system + "\n\n" + user_content],
-                config=genai_types.GenerateContentConfig(
-                    temperature=0.4,
-                    max_output_tokens=512,
-                ),
-            )
-            text = (response.text or "").strip()
-            if not text:
-                raise LLMError("Empty compose response from Gemini")
-            return text
-        except Exception as e:
-            raise LLMError(f"Gemini compose failed: {e}") from e
-
-    def compose_reply_with_history(
-        self,
-        messages: list[dict[str, str]],
-        message: str,
-        retrieved_row: dict | None,
-        match_kind: str,
-        customer_context: dict | None = None,
-    ) -> str:
-        """Compose reply with full conversation history."""
-        if match_kind == "none":
-            system = COMPOSE_NOMATCH_SYSTEM
-        elif match_kind == "medium":
-            system = COMPOSE_PARTIAL_SYSTEM
-        else:
-            system = COMPOSE_STRICT_SYSTEM
-
-        if retrieved_row:
-            source_str = " | ".join(
-                f"{k}: {v}" for k, v in retrieved_row.items() if v is not None
-            )
-        else:
-            source_str = "(tidak ada data yang cocok di katalog)"
-
-        user = COMPOSE_USER_TEMPLATE.format(
-            message=message,
-            source_row=source_str,
-            match_kind=match_kind,
-            customer_context=customer_context,
-        )
-
-        try:
-            from google.genai import types as genai_types
-
-            response = self._client.models.generate_content(
-                model=self.MODEL,
-                contents=[system + "\n\n" + user],
-                config=genai_types.GenerateContentConfig(
-                    temperature=0.4,
-                    max_output_tokens=512,
-                ),
-            )
-            text = (response.text or "").strip()
-            if not text:
-                raise LLMError("Empty compose response from Gemini")
-            return text
-        except Exception as e:  # noqa: BLE001
-            raise LLMError(f"Gemini compose failed: {e}") from e
+        """Multi-turn aware dummy reply."""
+        return self.compose_reply(message, retrieved_row, match_kind, customer_context)
 
 
 class AdaCodeLLMClient(LLMClient):
-    """Wraps OpenAI-compatible API (adaCODE platform) for intent classification and reply composition.
+    """Wraps AdaCODE's OpenAI-compatible chat completions API.
 
-    Uses the /v1/chat/completions endpoint with Bearer token authentication.
+    AdaCODE exposes POST {base_url}/v1/chat/completions (same shape as the
+    OpenAI API). Intent classification and reply composition are done by
+    prompting a chat model, mirroring the Gemini/Anthropic clients.
     """
 
-    def __init__(self, api_key: str, base_url: str | None = None, model: str | None = None):
-        self.api_key = api_key
-        self.base_url = base_url or "https://api.adacode.ai"
-        self.model = model or "claude-sonnet-4-6"
+    def __init__(self, api_key: str, base_url: str = "https://api.adacode.ai", model: str = "claude-sonnet-4-6"):
+        self._api_key = api_key
+        self._base_url = (base_url or "https://api.adacode.ai").rstrip("/")
+        self._model = model
+        self._session = httpx.Client(timeout=60.0)
 
-    def _call_completion(self, messages: list[dict[str, str]], max_tokens: int = 128) -> dict:
-        """Make a chat completion request to AdaCode API."""
+    def _chat(self, system: str, messages: list[dict[str, str]], max_tokens: int = 512) -> str:
+        """POST /v1/chat/completions and return the assistant text."""
+        resp = self._session.post(
+            f"{self._base_url}/v1/chat/completions",
+            headers={"Authorization": f"Bearer {self._api_key}"},
+            json={
+                "model": self._model,
+                "messages": [{"role": "system", "content": system}] + messages,
+                "max_tokens": max_tokens,
+            },
+            timeout=60.0,
+        )
+        resp.raise_for_status()
+        data = resp.json()
         try:
-            import httpx
-            response = httpx.post(
-                f"{self.base_url}/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {self.api_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": self.model,
-                    "messages": messages,
-                    "max_tokens": max_tokens,
-                    "temperature": 0,
-                },
-                timeout=30,
-            )
-            response.raise_for_status()
-            data = response.json()
-            return data
-        except httpx.RequestError as e:
-            raise LLMError(f"AdaCode network error: {e}") from e
-        except httpx.HTTPStatusError as e:
-            raise LLMError(f"AdaCode HTTP error: {e.response.status_code} - {e.response.text[:200]}") from e
-        except Exception as e:
-            raise LLMError(f"AdaCode API error: {e}") from e
+            return data["choices"][0]["message"]["content"].strip()
+        except (KeyError, IndexError, TypeError) as e:
+            raise LLMValidationError(f"Invalid AdaCode chat response format: {e}") from e
 
     def classify(self, message: str) -> ClassificationResult:
-        """Classify user message intent using AdaCode API."""
-        from app.graph.prompts import INTENT_CLASSIFICATION_SYSTEM, INTENT_CLASSIFICATION_USER
-
-        system_message = INTENT_CLASSIFICATION_SYSTEM + "\n\n" + INTENT_CLASSIFICATION_USER.format(message=message)
-
+        """Classify user message intent via AdaCode API."""
         try:
-            data = self._call_completion([
-                {"role": "system", "content": system_message},
-                {"role": "user", "content": message},
-            ], max_tokens=128)
-
-            # Extract the choice content
-            choices = data.get("choices", [])
-            if not choices:
-                raise LLMError("No choices in AdaCode response")
-
-            content = choices[0].get("message", {}).get("content", "")
-            if not content:
-                raise LLMError("No content in message from AdaCode response")
-
-            result = json.loads(content.strip())
-            intent = result.get("intent")
-            confidence = result.get("confidence")
-            has_complaint_signal = result.get("has_complaint_signal", False)
-            sentiment = result.get("sentiment", "neutral")
-
-            if intent not in VALID_INTENTS:
-                raise LLMError(f"Invalid intent from AdaCode: {intent}")
-            if not isinstance(confidence, (int, float)) or not (0.0 <= confidence <= 1.0):
-                raise LLMError(f"Invalid confidence from AdaCode: {confidence}")
-            if not isinstance(has_complaint_signal, bool):
-                raise LLMError(f"Invalid has_complaint_signal from AdaCode: {has_complaint_signal}")
-            if sentiment not in VALID_SENTIMENTS:
-                raise LLMError(f"Invalid sentiment from AdaCode: {sentiment}")
-
-            return {
-                "intent": intent,
-                "confidence": float(confidence),
-                "has_complaint_signal": has_complaint_signal,
-                "sentiment": sentiment,
-            }
-
-        except json.JSONDecodeError as e:
-            raise LLMError(f"Invalid JSON from AdaCode: {e}") from e
+            text = self._chat(
+                INTENT_CLASSIFICATION_SYSTEM,
+                [{"role": "user", "content": message}],
+                max_tokens=256,
+            )
+        except LLMValidationError:
+            raise
+        except httpx.HTTPStatusError as e:
+            raise LLMError(f"AdaCode API error: {e.response.status_code} {e.response.text}") from e
+        except httpx.HTTPError as e:
+            raise LLMError(f"AdaCode HTTP error: {e}") from e
         except Exception as e:
-            logger.exception("adacode_classify failed: %s", e)
-            raise LLMError(f"AdaCode API error: {e}") from e
+            if isinstance(e, LLMError):
+                raise
+            raise LLMError(f"Unexpected AdaCode error: {e}") from e
+        return self._parse_classification(text)
 
     def classify_with_history(self, messages: list[dict[str, str]]) -> ClassificationResult:
-        """Multi-turn aware classification using conversation history."""
-        from app.graph.prompts import INTENT_CLASSIFICATION_SYSTEM, INTENT_CLASSIFICATION_USER
-        latest_user_content = ""
-        for m in messages:
-            if m.get("role") == "user":
-                latest_user_content = m["content"]
-        if not latest_user_content:
+        """Classify with history — folds the conversation into one user message."""
+        history = [
+            m.get("content", "")
+            for m in messages
+            if isinstance(m, dict) and m.get("content")
+        ]
+        last_msg = history[-1] if history else ""
+        if not last_msg:
             return self.classify("")
-
-        system_message = INTENT_CLASSIFICATION_SYSTEM + "\n\n" + INTENT_CLASSIFICATION_USER.format(message=latest_user_content)
-
+        history_text = "\n".join(f"{m.get('role', 'user')}: {m.get('content', '')}" for m in messages if isinstance(m, dict))
         try:
-            data = self._call_completion([
-                {"role": "system", "content": system_message},
-                {"role": "user", "content": latest_user_content},
-            ], max_tokens=128)
+            text = self._chat(
+                INTENT_CLASSIFICATION_SYSTEM,
+                [{"role": "user", "content": history_text}],
+                max_tokens=256,
+            )
+        except LLMValidationError:
+            raise
+        except httpx.HTTPStatusError as e:
+            raise LLMError(f"AdaCode API error: {e.response.status_code} {e.response.text}") from e
+        except httpx.HTTPError as e:
+            raise LLMError(f"AdaCode HTTP error: {e}") from e
+        except Exception as e:
+            if isinstance(e, LLMError):
+                raise
+            raise LLMError(f"Unexpected AdaCode error: {e}") from e
+        return self._parse_classification(text)
 
-            choices = data.get("choices", [])
-            if not choices:
-                raise LLMError("No choices in AdaCode response")
-
-            content = choices[0].get("message", {}).get("content", "")
-            if not content:
-                raise LLMError("No content in message from AdaCode response")
-
-            result = json.loads(content.strip())
-            intent = result.get("intent")
-            confidence = result.get("confidence")
-            has_complaint_signal = result.get("has_complaint_signal", False)
-            sentiment = result.get("sentiment", "neutral")
-
+    def _parse_classification(self, text: str) -> ClassificationResult:
+        """Parse JSON classification from AdaCode output."""
+        try:
+            match = re.search(r'\{[^}]+\}', text)
+            if match:
+                data = json.loads(match.group())
+            else:
+                data = json.loads(text)
+            intent = data.get("intent", "").lower()
+            confidence = float(data.get("confidence", 0))
+            sentiment = data.get("sentiment", "neutral").lower()
             if intent not in VALID_INTENTS:
-                raise LLMError(f"Invalid intent from AdaCode: {intent}")
-            if not isinstance(confidence, (int, float)) or not (0.0 <= confidence <= 1.0):
-                raise LLMError(f"Invalid confidence from AdaCode: {confidence}")
-            if not isinstance(has_complaint_signal, bool):
-                raise LLMError(f"Invalid has_complaint_signal from AdaCode: {has_complaint_signal}")
+                raise LLMValidationError(f"Invalid intent from AdaCode: {intent!r}")
+            if not (0 <= confidence <= 1):
+                raise LLMValidationError(f"Confidence out of range: {confidence}")
             if sentiment not in VALID_SENTIMENTS:
-                raise LLMError(f"Invalid sentiment from AdaCode: {sentiment}")
+                sentiment = "neutral"
+            return {"intent": intent, "confidence": confidence, "sentiment": sentiment}
+        except (json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
+            raise LLMValidationError(f"Failed to parse AdaCode classification: {e}") from e
 
-            return {
-                "intent": intent,
-                "confidence": float(confidence),
-                "has_complaint_signal": has_complaint_signal,
-                "sentiment": sentiment,
-            }
-
-        except json.JSONDecodeError as e:
-            raise LLMError(f"Invalid JSON from AdaCode: {e}") from e
-        except Exception as e:
-            logger.exception("adacode_classify_with_history failed: %s", e)
-            raise LLMError(f"AdaCode API error: {e}") from e
-
-    def compose_reply(self, message: str, retrieved_row: dict | None, match_kind: str, customer_context: dict | None = None) -> str:
-        """Compose natural Indonesian reply grounded in retrieved_row via AdaCode API."""
-        from app.graph.prompts import COMPOSE_NOMATCH_SYSTEM, COMPOSE_PARTIAL_SYSTEM, COMPOSE_STRICT_SYSTEM, COMPOSE_USER_TEMPLATE
-
-        # Select system prompt based on match kind
-        if match_kind == "none":
-            system = COMPOSE_NOMATCH_SYSTEM
-        elif match_kind == "medium":
-            system = COMPOSE_PARTIAL_SYSTEM
-        else:
-            system = COMPOSE_STRICT_SYSTEM
-
-        if retrieved_row:
-            source_str = " | ".join(f"{k}: {v}" for k, v in retrieved_row.items() if v is not None)
-        else:
-            source_str = "(tidak ada data yang cocok di katalog)"
-
-        user_content = COMPOSE_USER_TEMPLATE.format(message=message, source_row=source_str, match_kind=match_kind, customer_context=customer_context)
-
-        try:
-            data = self._call_completion([
-                {"role": "system", "content": system},
-                {"role": "user", "content": user_content},
-            ], max_tokens=512)
-
-            choices = data.get("choices", [])
-            if not choices:
-                raise LLMError("No choices in AdaCode response for compose_reply")
-
-            return choices[0].get("message", {}).get("content", "").strip()
-
-        except json.JSONDecodeError as e:
-            raise LLMError(f"Invalid JSON from AdaCode compose: {e}") from e
-        except Exception as e:
-            raise LLMError(f"AdaCode compose failed: {e}") from e
+    def compose_reply(
+        self,
+        message: str,
+        retrieved_row: dict | None,
+        match_kind: str,
+        customer_context: dict | None = None,
+    ) -> str:
+        """Compose reply grounded in retrieved row via AdaCode."""
+        return self._compose(message, retrieved_row, match_kind, customer_context, with_history=False)
 
     def compose_reply_with_history(
         self,
@@ -802,8 +291,28 @@ class AdaCodeLLMClient(LLMClient):
         match_kind: str,
         customer_context: dict | None = None,
     ) -> str:
-        """Compose reply with full conversation history."""
-        from app.graph.prompts import COMPOSE_NOMATCH_SYSTEM, COMPOSE_PARTIAL_SYSTEM, COMPOSE_STRICT_SYSTEM, COMPOSE_USER_TEMPLATE
+        """Compose reply with history via AdaCode."""
+        return self._compose(message, retrieved_row, match_kind, customer_context, with_history=True, messages=messages)
+
+    def _compose(self, message, retrieved_row, match_kind, customer_context, with_history=False, messages=None):
+        """Internal compose via chat completions."""
+        prompt = self._build_compose_prompt(message, retrieved_row, match_kind, customer_context, with_history=with_history, messages=messages)
+        try:
+            text = self._chat(prompt, [], max_tokens=1024)
+        except LLMValidationError:
+            raise
+        except httpx.HTTPStatusError as e:
+            raise LLMError(f"AdaCode compose error: {e.response.status_code} {e.response.text}") from e
+        except httpx.HTTPError as e:
+            raise LLMError(f"AdaCode compose HTTP error: {e}") from e
+        except Exception as e:
+            if isinstance(e, LLMError):
+                raise
+            raise LLMError(f"Unexpected AdaCode compose error: {e}") from e
+        return self._parse_reply(text)
+
+    def _build_compose_prompt(self, message, retrieved_row, match_kind, customer_context, with_history=False, messages=None):
+        """Build compose prompt for AdaCode."""
         if match_kind == "none":
             system = COMPOSE_NOMATCH_SYSTEM
         elif match_kind == "medium":
@@ -811,139 +320,351 @@ class AdaCodeLLMClient(LLMClient):
         else:
             system = COMPOSE_STRICT_SYSTEM
 
+        prompt = system + "\n\n"
+        if with_history and messages:
+            history = "\n".join(
+                f"{m.get('role', 'user')}: {m.get('content', '')}" for m in messages
+            )
+            prompt += f"Conversation history:\n{history}\n\n"
+        prompt += f"User message: {message}\n"
         if retrieved_row:
-            source_str = " | ".join(f"{k}: {v}" for k, v in retrieved_row.items() if v is not None)
-        else:
-            source_str = "(tidak ada data yang cocok di katalog)"
+            prompt += f"Retrieved row: {retrieved_row}\n"
+        if customer_context:
+            prompt += f"Customer context: {customer_context}\n"
+        return prompt
 
-        user_content = COMPOSE_USER_TEMPLATE.format(message=message, source_row=source_str, match_kind=match_kind, customer_context=customer_context)
+    def _parse_reply(self, text: str) -> str:
+        """Parse and validate reply from AdaCode."""
+        reply = text.strip()
+        if not reply:
+            raise LLMValidationError("Empty reply from AdaCode")
+        return reply
 
+
+class GeminiLLMClient(LLMClient):
+    """Google Gemini-based LLM client for intent classification and reply composition."""
+
+    def __init__(self, api_key: str):
+        import google.generativeai as genai
+        self._genai = genai
+        self._api_key = api_key
+        self._genai.configure(api_key=api_key)
+        self._model = self._genai.GenerativeModel("gemini-2.0-flash")
+
+    def classify(self, message: str) -> ClassificationResult:
+        """Classify user message intent via Gemini."""
         try:
-            data = self._call_completion([
-                {"role": "system", "content": system},
-                {"role": "user", "content": user_content},
-            ], max_tokens=512)
-
-            choices = data.get("choices", [])
-            if not choices:
-                raise LLMError("No choices in AdaCode response for compose_reply")
-
-            return choices[0].get("message", {}).get("content", "").strip()
-
-        except json.JSONDecodeError as e:
-            raise LLMError(f"Invalid JSON from AdaCode compose: {e}") from e
+            prompt = INTENT_CLASSIFICATION_SYSTEM + "\n\nUser message: " + message
+            text = self._model.generate_content(prompt).text
+        except LLMError:
+            raise
         except Exception as e:
-            raise LLMError(f"AdaCode compose failed: {e}") from e
+            raise LLMError(f"Gemini classify error: {e}") from e
+        return self._parse_classification(text)
+
+    def classify_with_history(self, messages: list[dict[str, str]]) -> ClassificationResult:
+        """Classify with history via Gemini."""
+        try:
+            history_text = "\n".join(
+                f"{m.get('role', 'user')}: {m.get('content', '')}" for m in messages
+            )
+            prompt = INTENT_CLASSIFICATION_SYSTEM + "\n\nConversation history:\n" + history_text
+            text = self._model.generate_content(prompt).text
+        except LLMError:
+            raise
+        except Exception as e:
+            raise LLMError(f"Gemini classify_with_history error: {e}") from e
+        return self._parse_classification(text)
+
+    def _parse_classification(self, text: str) -> ClassificationResult:
+        """Parse JSON classification from Gemini output."""
+        try:
+            match = re.search(r'\{[^}]+\}', text)
+            if match:
+                data = json.loads(match.group())
+            else:
+                data = json.loads(text)
+            intent = data.get("intent", "").lower()
+            confidence = float(data.get("confidence", 0))
+            sentiment = data.get("sentiment", "neutral").lower()
+            if intent not in VALID_INTENTS:
+                raise LLMValidationError(f"Invalid intent: {intent!r}")
+            if not (0 <= confidence <= 1):
+                raise LLMValidationError(f"Confidence out of range: {confidence}")
+            if sentiment not in VALID_SENTIMENTS:
+                sentiment = "neutral"
+            return {"intent": intent, "confidence": confidence, "sentiment": sentiment}
+        except (json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
+            raise LLMValidationError(f"Failed to parse classification: {e}") from e
+
+    def compose_reply(
+        self,
+        message: str,
+        retrieved_row: dict | None,
+        match_kind: str,
+        customer_context: dict | None = None,
+    ) -> str:
+        """Compose reply via Gemini."""
+        try:
+            prompt = self._build_compose_prompt(message, retrieved_row, match_kind, customer_context, with_history=False)
+            text = self._model.generate_content(prompt).text
+        except LLMError:
+            raise
+        except Exception as e:
+            raise LLMError(f"Gemini compose_reply error: {e}") from e
+        return self._parse_reply(text)
+
+    def compose_reply_with_history(
+        self,
+        messages: list[dict[str, str]],
+        message: str,
+        retrieved_row: dict | None,
+        match_kind: str,
+        customer_context: dict | None = None,
+    ) -> str:
+        """Compose reply with history via Gemini."""
+        try:
+            prompt = self._build_compose_prompt(message, retrieved_row, match_kind, customer_context, with_history=True, messages=messages)
+            text = self._model.generate_content(prompt).text
+        except LLMError:
+            raise
+        except Exception as e:
+            raise LLMError(f"Gemini compose_reply_with_history error: {e}") from e
+        return self._parse_reply(text)
+
+    def _build_compose_prompt(self, message, retrieved_row, match_kind, customer_context, with_history=False, messages=None):
+        """Build compose prompt for Gemini."""
+        if match_kind == "none":
+            system = COMPOSE_NOMATCH_SYSTEM
+        elif match_kind == "medium":
+            system = COMPOSE_PARTIAL_SYSTEM
+        else:
+            system = COMPOSE_STRICT_SYSTEM
+
+        prompt = system + "\n\n"
+        if with_history and messages:
+            history = "\n".join(
+                f"{m.get('role', 'user')}: {m.get('content', '')}" for m in messages
+            )
+            prompt += f"Conversation history:\n{history}\n\n"
+        prompt += f"User message: {message}\n"
+        if retrieved_row:
+            prompt += f"Retrieved row: {retrieved_row}\n"
+        if customer_context:
+            prompt += f"Customer context: {customer_context}\n"
+        return prompt
+
+    def _parse_reply(self, text: str) -> str:
+        """Parse and validate reply from Gemini."""
+        reply = text.strip()
+        if not reply:
+            raise LLMValidationError("Empty reply from Gemini")
+        return reply
 
 
-def get_llm_client() -> LLMClient:
-    """Factory function that creates the appropriate LLM client based on LLM_BACKEND env var.
+class AnthropicLLMClient(LLMClient):
+    """Anthropic Claude-based LLM client."""
 
-    Supported backends: "anthropic", "gemini", "adacode". Default: "gemini".
+    def __init__(self, api_key: str):
+        import anthropic
+        self._anthropic = anthropic
+        self._client = anthropic.Anthropic(api_key=api_key)
+        self._model = "claude-3-5-haiku-20241022"
 
-    Raises LLMError if backend unknown or missing credentials.
-    """
-    from app.config import get_settings
+    def classify(self, message: str) -> ClassificationResult:
+        """Classify user message intent via Anthropic Claude."""
+        try:
+            prompt = INTENT_CLASSIFICATION_SYSTEM + "\n\nUser message: " + message
+            response = self._client.messages.create(
+                model=self._model,
+                max_tokens=256,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            text = response.content[0].text
+        except LLMError:
+            raise
+        except Exception as e:
+            raise LLMError(f"Anthropic classify error: {e}") from e
+        return self._parse_classification(text)
 
-    settings = get_settings()
-    backend = settings.llm_backend.lower() if settings.llm_backend else "gemini"
+    def classify_with_history(self, messages: list[dict[str, str]]) -> ClassificationResult:
+        """Classify with history via Anthropic Claude."""
+        try:
+            anthropic_messages = []
+            for m in messages:
+                role = m.get("role", "user")
+                if role == "user":
+                    anthropic_messages.append({"role": "user", "content": m.get("content", "")})
+                elif role == "assistant":
+                    anthropic_messages.append({"role": "assistant", "content": m.get("content", "")})
+            prompt = INTENT_CLASSIFICATION_SYSTEM + "\n\nConversation history:\n"
+            for am in anthropic_messages:
+                prompt += f"{am['role']}: {am['content']}\n"
+            response = self._client.messages.create(
+                model=self._model,
+                max_tokens=256,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            text = response.content[0].text
+        except LLMError:
+            raise
+        except Exception as e:
+            raise LLMError(f"Anthropic classify_with_history error: {e}") from e
+        return self._parse_classification(text)
 
-    if backend == "anthropic":
-        if not settings.anthropic_api_key:
-            raise LLMError("ANTHROPIC_API_KEY not set for anthropic backend")
-        return AnthropicLLMClient(api_key=settings.anthropic_api_key)
+    def _parse_classification(self, text: str) -> ClassificationResult:
+        """Parse JSON classification from Anthropic output."""
+        try:
+            match = re.search(r'\{[^}]+\}', text)
+            if match:
+                data = json.loads(match.group())
+            else:
+                data = json.loads(text)
+            intent = data.get("intent", "").lower()
+            confidence = float(data.get("confidence", 0))
+            sentiment = data.get("sentiment", "neutral").lower()
+            if intent not in VALID_INTENTS:
+                raise LLMValidationError(f"Invalid intent: {intent!r}")
+            if not (0 <= confidence <= 1):
+                raise LLMValidationError(f"Confidence out of range: {confidence}")
+            if sentiment not in VALID_SENTIMENTS:
+                sentiment = "neutral"
+            return {"intent": intent, "confidence": confidence, "sentiment": sentiment}
+        except (json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
+            raise LLMValidationError(f"Failed to parse classification: {e}") from e
 
-    elif backend == "gemini":
-        if not settings.gemini_api_key:
-            raise LLMError("GEMINI_API_KEY not set for gemini backend")
-        return GeminiLLMClient(api_key=settings.gemini_api_key)
+    def compose_reply(
+        self,
+        message: str,
+        retrieved_row: dict | None,
+        match_kind: str,
+        customer_context: dict | None = None,
+    ) -> str:
+        """Compose reply via Anthropic Claude."""
+        try:
+            prompt = self._build_compose_prompt(message, retrieved_row, match_kind, customer_context, with_history=False)
+            response = self._client.messages.create(
+                model=self._model,
+                max_tokens=1024,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            text = response.content[0].text
+        except LLMError:
+            raise
+        except Exception as e:
+            raise LLMError(f"Anthropic compose_reply error: {e}") from e
+        return self._parse_reply(text)
 
-    elif backend == "adacode":
-        if not settings.adacode_api_key:
-            raise LLMError("ADACODE_API_KEY not set for adacode backend")
-        return AdaCodeLLMClient(
-            api_key=settings.adacode_api_key,
-            base_url=settings.adacode_base_url,
-            model=settings.adacode_model,
-        )
+    def compose_reply_with_history(
+        self,
+        messages: list[dict[str, str]],
+        message: str,
+        retrieved_row: dict | None,
+        match_kind: str,
+        customer_context: dict | None = None,
+    ) -> str:
+        """Compose reply with history via Anthropic Claude."""
+        try:
+            prompt = self._build_compose_prompt(message, retrieved_row, match_kind, customer_context, with_history=True, messages=messages)
+            response = self._client.messages.create(
+                model=self._model,
+                max_tokens=1024,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            text = response.content[0].text
+        except LLMError:
+            raise
+        except Exception as e:
+            raise LLMError(f"Anthropic compose_reply_with_history error: {e}") from e
+        return self._parse_reply(text)
 
-    else:
-        raise LLMError(
-            f"unknown LLM backend: {backend}. Choose 'anthropic', 'gemini', or 'adacode'"
-        )
+    def _build_compose_prompt(self, message, retrieved_row, match_kind, customer_context, with_history=False, messages=None):
+        """Build compose prompt for Anthropic."""
+        if match_kind == "none":
+            system = COMPOSE_NOMATCH_SYSTEM
+        elif match_kind == "medium":
+            system = COMPOSE_PARTIAL_SYSTEM
+        else:
+            system = COMPOSE_STRICT_SYSTEM
+
+        prompt = system + "\n\n"
+        if with_history and messages:
+            history = "\n".join(
+                f"{m.get('role', 'user')}: {m.get('content', '')}" for m in messages
+            )
+            prompt += f"Conversation history:\n{history}\n\n"
+        prompt += f"User message: {message}\n"
+        if retrieved_row:
+            prompt += f"Retrieved row: {retrieved_row}\n"
+        if customer_context:
+            prompt += f"Customer context: {customer_context}\n"
+        return prompt
+
+    def _parse_reply(self, text: str) -> str:
+        """Parse and validate reply from Anthropic."""
+        reply = text.strip()
+        if not reply:
+            raise LLMValidationError("Empty reply from Anthropic")
+        return reply
 
 
 class FallingBackLLMClient(LLMClient):
-    """Wrapper that tries multiple LLM clients in priority order.
-
-    If one client raises an LLMError, the next client in the chain is tried.
-    If all fail, the last LLMError is re-raised.
-
-    NOTE: This catches only LLMError (network/API errors). LLMValidationError is NOT caught
-    because it indicates invalid output - the caller should handle it via its own fallback path.
-    """
+    """Client that falls back through a chain of clients."""
 
     def __init__(self, clients: list[LLMClient]):
+        if not clients:
+            raise LLMError("At least one client must be provided")
         self._clients = clients
-        self._fallback_chain = ", ".join(type(c).__name__ for c in clients)
 
     def classify(self, message: str) -> ClassificationResult:
-        """Classify with fallback across all registered clients."""
+        """Classify message intent using fallback chain."""
         for i, client in enumerate(self._clients):
             try:
                 result = client.classify(message)
-                logger.info(
-                    f"FallingBackLLMClient: classify succeeded with {type(client).__name__} "
-                    f"(attempt {i+1}/{len(self._clients)})"
-                )
+                logger.info(f"FallingBackLLMClient: classify succeeded with {type(client).__name__} (attempt {i+1}/{len(self._clients)})")
                 return result
+            except LLMValidationError:
+                raise
             except LLMError as e:
-                logger.warning(
-                    f"FallingBackLLMClient: classify failed with {type(client).__name__}: {e}, "
-                    f"trying next..."
-                )
-                # If this was the last client, re-raise the error
+                logger.warning(f"FallingBackLLMClient: classify failed with {type(client).__name__}: {e}, trying next...")
                 if i == len(self._clients) - 1:
                     raise
                 continue
-        # Unreachable, but needed to satisfy type checker
         raise LLMError("Unexpected error in FallingBackLLMClient.classify")
 
     def classify_with_history(self, messages: list[dict[str, str]]) -> ClassificationResult:
-        """Multi-turn classification with fallback."""
+        """Classify with history using fallback chain."""
         for i, client in enumerate(self._clients):
             try:
                 result = client.classify_with_history(messages)
-                logger.info(
-                    f"FallingBackLLMClient: classify_with_history succeeded with {type(client).__name__} "
-                    f"(attempt {i+1}/{len(self._clients)})"
-                )
+                logger.info(f"FallingBackLLMClient: classify_with_history succeeded with {type(client).__name__} (attempt {i+1}/{len(self._clients)})")
                 return result
+            except LLMValidationError:
+                raise
             except LLMError as e:
-                logger.warning(
-                    f"FallingBackLLMClient: classify_with_history failed with {type(client).__name__}: {e}, "
-                    f"trying next..."
-                )
+                logger.warning(f"FallingBackLLMClient: classify_with_history failed with {type(client).__name__}: {e}, trying next...")
                 if i == len(self._clients) - 1:
                     raise
                 continue
         raise LLMError("Unexpected error in FallingBackLLMClient.classify_with_history")
 
-    def compose_reply(self, message: str, retrieved_row: dict | None, match_kind: str, customer_context: dict | None = None) -> str:
-        """Compose reply with fallback."""
+    def compose_reply(
+        self,
+        message: str,
+        retrieved_row: dict | None,
+        match_kind: str,
+        customer_context: dict | None = None,
+    ) -> str:
+        """Compose reply using fallback chain."""
         for i, client in enumerate(self._clients):
             try:
                 result = client.compose_reply(message, retrieved_row, match_kind, customer_context)
-                logger.info(
-                    f"FallingBackLLMClient: compose_reply succeeded with {type(client).__name__} "
-                    f"(attempt {i+1}/{len(self._clients)})"
-                )
+                logger.info(f"FallingBackLLMClient: compose_reply succeeded with {type(client).__name__} (attempt {i+1}/{len(self._clients)})")
                 return result
+            except LLMValidationError:
+                raise
             except LLMError as e:
-                logger.warning(
-                    f"FallingBackLLMClient: compose_reply failed with {type(client).__name__}: {e}, "
-                    f"trying next..."
-                )
+                logger.warning(f"FallingBackLLMClient: compose_reply failed with {type(client).__name__}: {e}, trying next...")
                 if i == len(self._clients) - 1:
                     raise
                 continue
@@ -961,63 +682,162 @@ class FallingBackLLMClient(LLMClient):
         for i, client in enumerate(self._clients):
             try:
                 result = client.compose_reply_with_history(messages, message, retrieved_row, match_kind, customer_context)
-                logger.info(
-                    f"FallingBackLLMClient: compose_reply_with_history succeeded with {type(client).__name__} "
-                    f"(attempt {i+1}/{len(self._clients)})"
-                )
+                logger.info(f"FallingBackLLMClient: compose_reply_with_history succeeded with {type(client).__name__} (attempt {i+1}/{len(self._clients)})")
                 return result
+            except LLMValidationError:
+                raise
             except LLMError as e:
-                logger.warning(
-                    f"FallingBackLLMClient: compose_reply_with_history failed with {type(client).__name__}: {e}, "
-                    f"trying next..."
-                )
+                logger.warning(f"FallingBackLLMClient: compose_reply_with_history failed with {type(client).__name__}: {e}, trying next...")
                 if i == len(self._clients) - 1:
                     raise
                 continue
         raise LLMError("Unexpected error in FallingBackLLMClient.compose_reply_with_history")
 
 
-def get_fallback_llm_client(priority_backends: list[str]) -> LLMClient:
-    """Create a FallingBackLLMClient by instantiating clients from backend names.
+def get_llm_client() -> LLMClient:
+    """Get the primary LLM client based on configuration."""
+    from app.config import get_settings
+    settings = get_settings()
+    if settings.adacode_api_key:
+        return AdaCodeLLMClient(
+            api_key=settings.adacode_api_key,
+            base_url=settings.adacode_base_url,
+            model=settings.adacode_model,
+        )
+    if settings.gemini_api_key:
+        return GeminiLLMClient(api_key=settings.gemini_api_key)
+    if settings.anthropic_api_key:
+        return AnthropicLLMClient(api_key=settings.anthropic_api_key)
+    logger.warning("No LLM API key configured, falling back to MockLLMClient")
+    return MockLLMClient()
 
-    Args:
-        priority_backends: List of backend names in priority order, e.g. ["adacode", "gemini"].
-                           Each must be one of: "adacode", "gemini", "anthropic".
 
-    Returns:
-        A FallingBackLLMClient wrapping the configured clients in order.
+def get_fallback_llm_client(priority_backends: list[str] | None = None) -> LLMClient:
+    """Get a fallback-capable LLM client with the configured clients in order.
     """
     from app.config import get_settings
 
     settings = get_settings()
     clients: list[LLMClient] = []
 
-    for backend in priority_backends:
+    backends = priority_backends or ["adacode", "gemini", "anthropic"]
+
+    for backend in backends:
         backend_lower = backend.lower()
         if backend_lower == "adacode":
             if not settings.adacode_api_key:
-                raise LLMError(f"ADACODE_API_KEY not set for adacode backend in fallback chain")
-            client = AdaCodeLLMClient(
-                api_key=settings.adacode_api_key,
-                base_url=settings.adacode_base_url,
-                model=settings.adacode_model,
-            )
-            clients.append(client)
+                logger.warning("ADACODE_API_KEY not set, skipping adacode")
+                continue
+            try:
+                client = AdaCodeLLMClient(
+                    api_key=settings.adacode_api_key,
+                    base_url=settings.adacode_base_url,
+                    model=settings.adacode_model,
+                )
+                clients.append(client)
+                logger.info(f"Added AdaCode client to fallback chain")
+            except Exception as e:
+                logger.warning(f"Failed to init AdaCode client: {e}")
         elif backend_lower == "gemini":
             if not settings.gemini_api_key:
-                raise LLMError(f"GEMINI_API_KEY not set for gemini backend in fallback chain")
-            clients.append(GeminiLLMClient(api_key=settings.gemini_api_key))
+                logger.warning("GEMINI_API_KEY not set, skipping gemini")
+                continue
+            try:
+                import google.generativeai as genai  # type: ignore
+                client = GeminiLLMClient(api_key=settings.gemini_api_key)
+                clients.append(client)
+                logger.info(f"Added Gemini client to fallback chain")
+            except (ImportError, ModuleNotFoundError):
+                logger.warning("google.generativeai not installed, skipping gemini")
+            except Exception as e:
+                logger.warning(f"Failed to init Gemini client: {e}")
         elif backend_lower == "anthropic":
             if not settings.anthropic_api_key:
-                raise LLMError(f"ANTHROPIC_API_KEY not set for anthropic backend in fallback chain")
-            clients.append(AnthropicLLMClient(api_key=settings.anthropic_api_key))
+                logger.warning("ANTHROPIC_API_KEY not set, skipping anthropic")
+                continue
+            try:
+                client = AnthropicLLMClient(api_key=settings.anthropic_api_key)
+                clients.append(client)
+                logger.info(f"Added Anthropic client to fallback chain")
+            except Exception as e:
+                logger.warning(f"Failed to init Anthropic client: {e}")
         else:
-            raise LLMError(f"Unknown backend '{backend}' in fallback chain; choose adacode/gemini/anthropic")
+            logger.warning(f"Unknown backend '{backend}' in fallback chain; choose adacode/gemini/anthropic")
 
     if not clients:
-        raise LLMError("At least one backend must be specified in priority_backends")
+        logger.warning("No LLM backends available, using MockLLMClient as fallback")
+        return MockLLMClient()
 
     return FallingBackLLMClient(clients)
+
+
+def get_safe_llm_client(priority_backends: list[str] | None = None) -> LLMClient:
+    """Get LLM client with safe fallback to MockLLMClient on any error.
+    
+    This wraps get_fallback_llm_client and falls back to MockLLMClient if:
+    1. No clients could be initialized (returns MockLLMClient)
+    2. All backends fail at runtime (falls back to MockLLMClient)
+    """
+    try:
+        client = get_fallback_llm_client(priority_backends)
+    except LLMError as e:
+        logger.warning(f"Failed to create fallback LLM client: {e}, using MockLLMClient")
+        return MockLLMClient()
+    
+    # Wrap the client to catch runtime errors and fallback to MockLLMClient
+    return _SafeLLMClientWrapper(client, priority_backends)
+
+
+class _SafeLLMClientWrapper(LLMClient):
+    """Wrapper that falls back to MockLLMClient on any runtime error."""
+    
+    def __init__(self, wrapped: LLMClient, priority_backends: list[str] | None = None):
+        self._wrapped = wrapped
+        self._priority_backends = priority_backends or ["adacode", "gemini", "anthropic"]
+    
+    def classify(self, message: str) -> ClassificationResult:
+        try:
+            return self._wrapped.classify(message)
+        except LLMError as e:
+            logger.warning(f"LLM classify failed: {e}, trying fallback backends...")
+            # Try next backend in chain
+            for backend in self._priority_backends:
+                try:
+                    alt_client = get_fallback_llm_client([backend])
+                    return alt_client.classify(message)
+                except LLMError:
+                    continue
+            # All backends failed, fallback to mock
+            logger.warning(f"All backends failed, using MockLLMClient")
+            return MockLLMClient().classify(message)
+    
+    def classify_with_history(self, messages: list[dict[str, str]]) -> ClassificationResult:
+        try:
+            return self._wrapped.classify_with_history(messages)
+        except LLMError as e:
+            logger.warning(f"LLM classify_with_history failed: {e}, trying fallback backends...")
+            for backend in self._priority_backends:
+                try:
+                    alt_client = get_fallback_llm_client([backend])
+                    return alt_client.classify_with_history(messages)
+                except LLMError:
+                    continue
+            logger.warning(f"All backends failed, using MockLLMClient")
+            return MockLLMClient().classify_with_history(messages)
+    
+    def compose_reply(self, message: str, retrieved_row: dict | None, match_kind: str, customer_context: dict | None = None) -> str:
+        try:
+            return self._wrapped.compose_reply(message, retrieved_row, match_kind, customer_context)
+        except LLMError as e:
+            logger.warning(f"LLM compose_reply failed: {e}, using MockLLMClient")
+            return MockLLMClient().compose_reply(message, retrieved_row, match_kind, customer_context)
+
+    def compose_reply_with_history(self, messages: list[dict[str, str]], message: str, retrieved_row: dict | None, match_kind: str, customer_context: dict | None = None) -> str:
+        try:
+            return self._wrapped.compose_reply_with_history(messages, message, retrieved_row, match_kind, customer_context)
+        except LLMError as e:
+            logger.warning(f"LLM compose_reply_with_history failed: {e}, using MockLLMClient")
+            return MockLLMClient().compose_reply_with_history(messages, message, retrieved_row, match_kind, customer_context)
 
 
 __all__ = [
@@ -1029,13 +849,10 @@ __all__ = [
     "FallingBackLLMClient",  # new: wraps multiple backends with automatic failover
     "get_llm_client",
     "get_fallback_llm_client",  # convenience factory for fall-back chains
+    "get_safe_llm_client",  # safe factory with mock fallback
     "LLMValidationError",
     "validate_reply",
 ]
-
-
-class LLMValidationError(Exception):
-    """Raised when LLM-composed reply contains facts not in source row."""
 
 
 def validate_reply(reply: str, source_row: dict | str | None) -> None:

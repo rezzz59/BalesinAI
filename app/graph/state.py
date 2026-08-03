@@ -37,3 +37,5 @@ class ChatState(TypedDict, total=False):
     # Final action
     action: Action
     fallback_reason: str | None
+    # FAQ lookup output (fast path)
+    faq_match: str | None  # Set when FAQ lookup matches before LLM classify

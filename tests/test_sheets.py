@@ -30,10 +30,11 @@ def patch_object_gspread(mock_worksheet):
 
 def test_read_faq_returns_rows(client):
     mock_worksheet = MagicMock()
-    mock_worksheet.get_all_records = MagicMock(
+    mock_worksheet.get_all_values = MagicMock(
         return_value=[
-            {"pertanyaan": "Harga?", "jawaban": "Rp 50.000"},
-            {"pertanyaan": "Warna?", "jawaban": "Merah, Biru"},
+            ["pertanyaan", "jawaban"],
+            ["Harga?", "Rp 50.000"],
+            ["Warna?", "Merah, Biru"],
         ]
     )
 
@@ -46,9 +47,10 @@ def test_read_faq_returns_rows(client):
 
 def test_read_catalog_returns_rows(client):
     mock_worksheet = MagicMock()
-    mock_worksheet.get_all_records = MagicMock(
+    mock_worksheet.get_all_values = MagicMock(
         return_value=[
-            {"nama_produk": "Kaos Polos", "harga": "50000", "ready": "Y", "deskripsi": "100% katun"},
+            ["nama_produk", "harga", "ready", "deskripsi"],
+            ["Kaos Polos", "50000", "Y", "100% katun"],
         ]
     )
 
@@ -61,10 +63,11 @@ def test_read_catalog_returns_rows(client):
 
 def test_lookup_faq_finds_match(client):
     mock_worksheet = MagicMock()
-    mock_worksheet.get_all_records = MagicMock(
+    mock_worksheet.get_all_values = MagicMock(
         return_value=[
-            {"pertanyaan": "Berapa harga?", "jawaban": "Mulai Rp 50.000"},
-            {"pertanyaan": "Ada warna merah?", "jawaban": "Ada, Ready stock"},
+            ["pertanyaan", "jawaban"],
+            ["Berapa harga?", "Mulai Rp 50.000"],
+            ["Ada warna merah?", "Ada, Ready stock"],
         ]
     )
 
@@ -77,8 +80,11 @@ def test_lookup_faq_finds_match(client):
 
 def test_lookup_faq_no_match_returns_none(client):
     mock_worksheet = MagicMock()
-    mock_worksheet.get_all_records = MagicMock(
-        return_value=[{"pertanyaan": "Halo", "jawaban": "Hai juga"}]
+    mock_worksheet.get_all_values = MagicMock(
+        return_value=[
+            ["pertanyaan", "jawaban"],
+            ["Halo", "Hai juga"],
+        ]
     )
 
     with patch_object_gspread(mock_worksheet):
@@ -89,8 +95,11 @@ def test_lookup_faq_no_match_returns_none(client):
 
 def test_60s_cache_avoids_recalling_api(client):
     mock_worksheet = MagicMock()
-    mock_worksheet.get_all_records = MagicMock(
-        return_value=[{"pertanyaan": "Halo", "jawaban": "Hai"}]
+    mock_worksheet.get_all_values = MagicMock(
+        return_value=[
+            ["pertanyaan", "jawaban"],
+            ["Halo", "Hai"],
+        ]
     )
 
     with patch_object_gspread(mock_worksheet):
@@ -99,11 +108,11 @@ def test_60s_cache_avoids_recalling_api(client):
 
         # First call
         client.read_faq()
-        # Second call within TTL — should NOT call get_all_records again
+        # Second call within TTL — should NOT call get_all_values again
         client.read_faq()
 
-        # get_all_records only called once due to cache
-        assert mock_worksheet.get_all_records.call_count == 1
+        # get_all_values only called once due to cache
+        assert mock_worksheet.get_all_values.call_count == 1
 
 
 def test_lookup_faq_picks_highest_scoring_match(client):
@@ -114,11 +123,12 @@ def test_lookup_faq_picks_highest_scoring_match(client):
     row had a 3-word overlap (kalau/salah/ukuran).
     """
     mock_worksheet = MagicMock()
-    mock_worksheet.get_all_records = MagicMock(
+    mock_worksheet.get_all_values = MagicMock(
         return_value=[
-            {"pertanyaan": "Berapa harga?", "jawaban": "Mulai Rp 50.000"},
-            {"pertanyaan": "Ukuran kaosnya gimana?", "jawaban": "S M L XL"},
-            {"pertanyaan": "Bisa retur kalau salah ukuran?", "jawaban": "Bisa tukar size"},
+            ["pertanyaan", "jawaban"],
+            ["Berapa harga?", "Mulai Rp 50.000"],
+            ["Ukuran kaosnya gimana?", "S M L XL"],
+            ["Bisa retur kalau salah ukuran?", "Bisa tukar size"],
         ]
     )
 
@@ -139,9 +149,10 @@ def test_lookup_faq_filters_stopwords(client):
     assert "gimana" in STOPWORDS_ID
 
     mock_worksheet = MagicMock()
-    mock_worksheet.get_all_records = MagicMock(
+    mock_worksheet.get_all_values = MagicMock(
         return_value=[
-            {"pertanyaan": "Bisa retur kalau salah ukuran?", "jawaban": "Bisa tukar size"},
+            ["pertanyaan", "jawaban"],
+            ["Bisa retur kalau salah ukuran?", "Bisa tukar size"],
         ]
     )
 
@@ -155,8 +166,11 @@ def test_lookup_faq_filters_stopwords(client):
 def test_lookup_faq_returns_none_when_no_meaningful_words(client):
     """A message that's only stopwords/punctuation must produce no match."""
     mock_worksheet = MagicMock()
-    mock_worksheet.get_all_records = MagicMock(
-        return_value=[{"pertanyaan": "Apa kabar?", "jawaban": "Baik"}]
+    mock_worksheet.get_all_values = MagicMock(
+        return_value=[
+            ["pertanyaan", "jawaban"],
+            ["Apa kabar?", "Baik"],
+        ]
     )
 
     with patch_object_gspread(mock_worksheet):
@@ -168,8 +182,11 @@ def test_lookup_faq_returns_none_when_no_meaningful_words(client):
 def test_lookup_faq_returns_none_for_empty_message(client):
     """Empty/whitespace message is treated as no query."""
     mock_worksheet = MagicMock()
-    mock_worksheet.get_all_records = MagicMock(
-        return_value=[{"pertanyaan": "Apa kabar?", "jawaban": "Baik"}]
+    mock_worksheet.get_all_values = MagicMock(
+        return_value=[
+            ["pertanyaan", "jawaban"],
+            ["Apa kabar?", "Baik"],
+        ]
     )
 
     with patch_object_gspread(mock_worksheet):

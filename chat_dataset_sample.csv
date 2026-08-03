@@ -1,0 +1,125 @@
+id,thread_id,tenant_id,wa_number,intent,confidence,response,fallback_reason,status,timestamp,user_message,ground_truth_intent,ground_truth_response,quality_rating
+740,50650750660756@lid,083135333166,+6283142298645,unclear,0.9,,unclear,fallback,2026-08-01 03:17:06.981436,,,,
+739,50650750660756@lid,083135333166,+6283142298645,unclear,0.9,,unclear,fallback,2026-08-01 03:12:29.045765,,,,
+738,50650750660756@lid,083135333166,+6283142298645,faq,1.0,✅ Webhook aktif! Chatbot siap menerima pesanan.,,reply,2026-08-01 03:12:13.662451,,,,
+737,50650750660756@lid,083135333166,+6283142298645,unclear,0.9,,unclear,fallback,2026-08-01 03:12:07.582675,,,,
+736,50650750660756@lid,083135333166,+6283142298645,unclear,0.9,,unclear,fallback,2026-08-01 03:11:48.792519,,,,
+735,50650750660756@lid,083135333166,+6283142298645,faq,1.0,Untuk 100 pcs ke atas bisa request warna Pantone.,,reply,2026-08-01 03:11:29.087400,,,,
+734,50650750660756@lid,083135333166,+6283142298645,faq,1.0,"Kirim pesan 'komplain [nomor order] [masalah]', nanti saya sambungkan ke admin.",,reply,2026-08-01 03:11:06.284705,,,,
+733,50650750660756@lid,083135333166,+6283142298645,faq,1.0,Bisa untuk area Jabodetabek dan Bandung. Di luar itu harus transfer dulu.,,reply,2026-08-01 03:10:46.090973,,,,
+732,50650750660756@lid,083135333166,+6283142298645,faq,1.0,"Hitam, Putih, Navy, Merah Maroon, Abu Misty, Sage Green, dan Dusty Pink.",,reply,2026-08-01 03:10:30.353471,,,,
+731,50650750660756@lid,083135333166,+6283142298645,faq,1.0,✅ Webhook aktif! Chatbot siap menerima pesanan.,,reply,2026-08-01 03:10:18.680212,,,,
+730,50650750660756@lid,083135333166,+6283142298645,faq,1.0,"Halo Kak! 👋 Ada yang bisa saya bantu? Tanyakan tentang harga, stok, atau promo.",,reply,2026-08-01 03:10:03.907821,,,,
+729,50650750660756@lid,083135333166,+6283142298645,faq,1.0,✅ Webhook aktif! Chatbot siap menerima pesanan.,,reply,2026-08-01 03:10:03.288623,,,,
+728,test_thread,default,+6283142298645,faq,1.0,Ada promo diskon 20% untuk semua produk! Silahkan cek website kami.,,reply,2026-08-01 03:05:37.777662,,,,
+727,test_thread,default,+6283142298645,faq,1.0,Kaos polos Rp 35.000/pcs untuk 100 pcs. Hubungi admin untuk detail.,,reply,2026-08-01 03:05:37.487896,,,,
+726,test_thread,default,+6283142298645,faq,1.0,✅ Webhook berfungsi! Chatbot siap digunakan.,,reply,2026-08-01 03:05:37.130581,,,,
+725,test_thread,default,+6283142298645,faq,1.0,"Halo Kak! 👋 Ada yang bisa saya bantu? Tanyakan tentang harga, stok, atau promo.",,reply,2026-08-01 03:05:36.806843,,,,
+724,test_thread,default,+6283142298645,faq,1.0,✅ Webhook aktif! Chatbot siap menerima pesanan.,,reply,2026-08-01 03:05:36.371648,,,,
+723,test_thread,default,+6283142298645,faq,1.0,✅ Webhook aktif! Chatbot siap menerima pesanan.,,reply,2026-08-01 03:04:43.386550,,,,
+722,test_thread,default,+6283142298645,faq,1.0,✅ Webhook aktif! Chatbot siap menerima pesanan.,,reply,2026-08-01 03:04:43.313614,,,,
+721,test_thread,default,+6283142298645,unclear,0.9,,unclear,fallback,2026-08-01 03:03:44.482919,,,,
+720,test_thread,default,+6283142298645,unclear,0.9,,unclear,fallback,2026-08-01 03:03:11.886759,,,,
+719,test_thread,default,+6283142298645,unclear,0.9,,unclear,fallback,2026-08-01 02:40:07.365165,,,,
+718,test_thread,default,+6283142298645,unclear,0.9,,unclear,fallback,2026-08-01 02:39:19.311118,,,,
+717,test_thread,default,+6283142298645,unclear,0.9,,unclear,fallback,2026-08-01 02:38:44.976531,,,,
+716,test_thread,default,+6283142298645,unclear,0.9,,unclear,fallback,2026-08-01 02:36:49.323032,,,,
+715,test_thread,default,+6283142298645,unclear,0.9,,unclear,fallback,2026-08-01 02:36:47.383555,,,,
+714,test_thread,default,+6283142298645,unclear,0.9,,unclear,fallback,2026-08-01 02:36:45.073051,,,,
+713,test_thread,default,+6283142298645,unclear,0.9,,unclear,fallback,2026-08-01 02:36:42.501534,,,,
+712,test_thread,default,+6283142298645,unclear,0.9,,unclear,fallback,2026-08-01 02:36:40.852623,,,,
+711,test_thread,default,+6283142298645,unclear,0.9,,unclear,fallback,2026-08-01 02:35:16.593536,,,,
+710,test_thread,default,+6283142298645,unclear,0.9,,unclear,fallback,2026-08-01 02:35:15.250546,,,,
+709,test_thread,default,+6283142298645,unclear,0.9,,unclear,fallback,2026-08-01 02:35:13.694883,,,,
+708,test_thread,default,+6283142298645,unclear,0.9,,unclear,fallback,2026-08-01 02:35:13.021571,,,,
+707,test_thread,default,+6283142298645,unclear,0.9,,unclear,fallback,2026-08-01 02:35:12.289904,,,,
+706,test_thread,default,+6283142298645,unclear,0.9,,unclear,fallback,2026-08-01 02:33:19.579967,,,,
+705,test_thread,default,+6283142298645,unclear,0.9,,unclear,fallback,2026-08-01 02:33:17.581426,,,,
+704,test_thread,default,+6283142298645,unclear,0.9,,unclear,fallback,2026-08-01 02:33:15.352439,,,,
+703,test_thread,default,+6283142298645,unclear,0.9,,unclear,fallback,2026-08-01 02:33:14.238535,,,,
+702,50650750660756@lid,083135333166,+6283142298645,unclear,0.9,,unclear,fallback,2026-08-01 02:28:40.440180,,,,
+701,50650750660756@lid,083135333166,+6283142298645,unclear,0.9,,unclear,fallback,2026-08-01 02:27:39.920384,,,,
+700,50650750660756@lid,083135333166,+6283142298645,unclear,0.9,,unclear,fallback,2026-08-01 02:27:22.512095,,,,
+699,50650750660756@lid,083135333166,+6283142298645,unclear,0.9,,unclear,fallback,2026-08-01 02:27:08.633453,,,,
+698,50650750660756@lid,083135333166,+6283142298645,unclear,0.9,,unclear,fallback,2026-08-01 02:19:40.435825,,,,
+697,50650750660756@lid,083135333166,+6283142298645,unclear,0.9,,unclear,fallback,2026-08-01 02:19:23.062947,,,,
+696,50650750660756@lid,083135333166,+6283142298645,unclear,0.9,,unclear,fallback,2026-08-01 02:18:58.735831,,,,
+695,50650750660756@lid,083135333166,+6283142298645,unclear,0.9,,unclear,fallback,2026-08-01 02:18:54.693676,,,,
+694,50650750660756@lid,083135333166,+6283142298645,unclear,0.9,,unclear,fallback,2026-08-01 02:18:37.157487,,,,
+693,50650750660756@lid,083135333166,+6283142298645,unclear,0.9,,unclear,fallback,2026-08-01 02:18:23.618025,,,,
+692,50650750660756@lid,083135333166,+6283142298645,unclear,0.9,,unclear,fallback,2026-08-01 02:18:14.425986,,,,
+691,50650750660756@lid,083135333166,+6283142298645,unclear,0.9,,unclear,fallback,2026-08-01 02:17:57.028994,,,,
+690,50650750660756@lid,083135333166,+6283142298645,unclear,0.9,,unclear,fallback,2026-08-01 02:17:39.064721,,,,
+689,50650750660756@lid,083135333166,+6283142298645,unclear,0.9,,unclear,fallback,2026-08-01 02:17:21.818205,,,,
+688,50650750660756@lid,083135333166,+6283142298645,unclear,0.9,,unclear,fallback,2026-08-01 02:17:08.141361,,,,
+687,50650750660756@lid,083135333166,+6283142298645,unclear,0.9,,unclear,fallback,2026-08-01 02:16:05.076383,,,,
+686,test:+6281234567890,test_tenant,+6281234567890,confirm_order,0.95,Terima kasih ordernya! Owner akan follow up untuk konfirmasi pembayaran ya 🙏,,order,2026-07-31 10:30:57.544123,,,,
+685,test:+6281234567890,test_tenant,+6281234567890,faq,0.8,"Terima kasih, akan kami proses.",,reply,2026-07-31 10:30:57.520119,,,,
+684,test:+6281234567890,test_tenant,+6281234567890,faq,0.8,"Mohon maaf, produk kami bisa diganti atau dikembalikan karena rusak.",,reply,2026-07-31 10:30:57.502270,,,,
+683,test:+6281234567890,test_tenant,+6281234567890,unclear,1.0,,unclear,fallback,2026-07-31 10:30:57.466299,,,,
+682,test:+6281234567890,test_tenant,+6281234567890,unclear,1.0,,unclear,fallback,2026-07-31 10:30:57.455599,,,,
+681,test:+6281234567890,test_tenant,+6281234567890,faq,0.8,Terima kasih pesannya sudah kami terima.,,reply,2026-07-31 10:30:57.444859,,,,
+680,test:+6281234567890,test_tenant,+6281234567890,faq,0.8,Terima kasih pesannya sudah kami terima.,,reply,2026-07-31 10:30:57.430738,,,,
+679,test:+6281234567890,test_tenant,+6281234567890,faq,0.8,Terima kasih pesannya sudah kami terima.,,reply,2026-07-31 10:30:57.412883,,,,
+678,test:+6281234567890,test_tenant,+6281234567890,faq,0.8,Terima kasih pesannya sudah kami terima.,,reply,2026-07-31 10:30:57.361484,,,,
+677,test:+6281234567890,test_tenant,+6281234567890,unclear,1.0,,unclear,fallback,2026-07-31 10:30:57.325675,,,,
+676,test:+6281234567890,test_tenant,+6281234567890,faq,0.8,"Untuk informasi harga, silakan hubungi kami.",,reply,2026-07-31 10:30:57.285061,,,,
+675,test:+6281234567890,test_tenant,+6281234567890,faq,0.8,Garansi produk kami 1 bulan dari tanggal pembelian.,,reply,2026-07-31 10:30:57.269361,,,,
+674,test:+6281234567890,test_tenant,+6281234567890,faq,0.8,Terima kasih pesannya sudah kami terima.,,reply,2026-07-31 10:30:57.232250,,,,
+673,test:+6281234567890,test_tenant,+6281234567890,faq,0.8,"Halo Kak, kami catat dulu ya 🙏
+
+Default jawaban.
+
+Untuk detail yang lebih spesifik, kami akan forward ke owner ya Kak.",,reply,2026-07-31 10:30:57.194272,,,,
+672,test:+6281234567890,test_tenant,+6281234567890,faq,0.8,"Halo Kak, kami catat dulu ya 🙏
+
+Default jawaban.
+
+Untuk detail yang lebih spesifik, kami akan forward ke owner ya Kak.",,reply,2026-07-31 10:30:57.163816,,,,
+671,test:+6281234567890,test_tenant,+6281234567890,faq,0.8,"Halo Kak, kami catat dulu ya 🙏
+
+Default jawaban.
+
+Untuk detail yang lebih spesifik, kami akan forward ke owner ya Kak.",,reply,2026-07-31 10:30:57.130936,,,,
+670,test:+6281234567890,test_tenant,+6281234567890,confirm_order,0.9,Terima kasih ordernya! Owner akan follow up untuk konfirmasi pembayaran ya 🙏,,order,2026-07-31 10:30:57.090009,,,,
+669,test:+6281234567890,test_tenant,+6281234567890,faq,0.8,Responding normally,,reply,2026-07-31 10:30:57.044273,,,,
+668,test:+6281234567890,test_tenant,+6281234567890,unclear,0.3,,unclear,fallback,2026-07-31 10:30:56.985672,,,,
+667,test:+6281234567890,test_tenant,+6281234567890,faq,0.8,"Mohon maaf, produk kami bisa diganti atau dikembalikan karena rusak.",,reply,2026-07-31 10:30:56.935709,,,,
+666,test:+6281234567890,test_tenant,+6281234567890,faq,0.8,Kaos hitam ukuran L tersedia di gudang.,,reply,2026-07-31 10:30:56.903401,,,,
+665,test:+6281234567890,test_tenant,+6281234567890,faq,0.8,Garansi produk kami 1 bulan dari tanggal pembelian.,,reply,2026-07-31 10:30:56.869996,,,,
+664,test:+6281234567890,test_tenant,+6281234567890,faq,0.8,Garansi produk kami 1 bulan dari tanggal pembelian.,,reply,2026-07-31 10:23:17.714517,,,,
+663,test:+6281234567890,test_tenant,+6281234567890,confirm_order,0.95,Terima kasih ordernya! Owner akan follow up untuk konfirmasi pembayaran ya 🙏,,order,2026-07-31 10:21:43.110906,,,,
+662,test:+6281234567890,test_tenant,+6281234567890,faq,0.8,"Terima kasih, akan kami proses.",,reply,2026-07-31 10:21:43.088381,,,,
+661,test:+6281234567890,test_tenant,+6281234567890,faq,0.8,"Mohon maaf, produk kami bisa diganti atau dikembalikan karena rusak.",,reply,2026-07-31 10:21:43.070850,,,,
+660,test:+6281234567890,test_tenant,+6281234567890,unclear,1.0,,unclear,fallback,2026-07-31 10:21:43.043290,,,,
+659,test:+6281234567890,test_tenant,+6281234567890,unclear,1.0,,unclear,fallback,2026-07-31 10:21:43.033102,,,,
+658,test:+6281234567890,test_tenant,+6281234567890,faq,0.8,Terima kasih pesannya sudah kami terima.,,reply,2026-07-31 10:21:43.019681,,,,
+657,test:+6281234567890,test_tenant,+6281234567890,faq,0.8,Terima kasih pesannya sudah kami terima.,,reply,2026-07-31 10:21:43.006480,,,,
+656,test:+6281234567890,test_tenant,+6281234567890,faq,0.8,Terima kasih pesannya sudah kami terima.,,reply,2026-07-31 10:21:42.995916,,,,
+655,test:+6281234567890,test_tenant,+6281234567890,faq,0.8,Terima kasih pesannya sudah kami terima.,,reply,2026-07-31 10:21:42.973429,,,,
+654,test:+6281234567890,test_tenant,+6281234567890,unclear,1.0,,unclear,fallback,2026-07-31 10:21:42.949409,,,,
+653,test:+6281234567890,test_tenant,+6281234567890,faq,0.8,"Untuk informasi harga, silakan hubungi kami.",,reply,2026-07-31 10:21:42.926472,,,,
+652,test:+6281234567890,test_tenant,+6281234567890,faq,0.8,Garansi produk kami 1 bulan dari tanggal pembelian.,,reply,2026-07-31 10:21:42.915779,,,,
+651,test:+6281234567890,test_tenant,+6281234567890,faq,0.8,Terima kasih pesannya sudah kami terima.,,reply,2026-07-31 10:21:42.891470,,,,
+650,test:+6281234567890,test_tenant,+6281234567890,faq,0.8,"Halo Kak, kami catat dulu ya 🙏
+
+Default jawaban.
+
+Untuk detail yang lebih spesifik, kami akan forward ke owner ya Kak.",,reply,2026-07-31 10:21:42.870919,,,,
+649,test:+6281234567890,test_tenant,+6281234567890,faq,0.8,"Halo Kak, kami catat dulu ya 🙏
+
+Default jawaban.
+
+Untuk detail yang lebih spesifik, kami akan forward ke owner ya Kak.",,reply,2026-07-31 10:21:42.850468,,,,
+648,test:+6281234567890,test_tenant,+6281234567890,faq,0.8,"Halo Kak, kami catat dulu ya 🙏
+
+Default jawaban.
+
+Untuk detail yang lebih spesifik, kami akan forward ke owner ya Kak.",,reply,2026-07-31 10:21:42.830845,,,,
+647,test:+6281234567890,test_tenant,+6281234567890,confirm_order,0.9,Terima kasih ordernya! Owner akan follow up untuk konfirmasi pembayaran ya 🙏,,order,2026-07-31 10:21:42.810957,,,,
+646,test:+6281234567890,test_tenant,+6281234567890,faq,0.8,Responding normally,,reply,2026-07-31 10:21:42.786768,,,,
+645,test:+6281234567890,test_tenant,+6281234567890,unclear,0.3,,unclear,fallback,2026-07-31 10:21:42.764961,,,,
+644,test:+6281234567890,test_tenant,+6281234567890,faq,0.8,"Mohon maaf, produk kami bisa diganti atau dikembalikan karena rusak.",,reply,2026-07-31 10:21:42.743452,,,,
+643,test:+6281234567890,test_tenant,+6281234567890,faq,0.8,Kaos hitam ukuran L tersedia di gudang.,,reply,2026-07-31 10:21:42.719484,,,,
+642,test:+6281234567890,test_tenant,+6281234567890,faq,0.8,Garansi produk kami 1 bulan dari tanggal pembelian.,,reply,2026-07-31 10:21:42.693668,,,,
+641,thread-abc,demo,+6281234567890,faq,0.9,(implicit FAQ) <MagicMock name='mock.lookup_faq().__getitem__()' id='138876986082208'>,,reply,2026-07-31 10:21:22.985971,,,,

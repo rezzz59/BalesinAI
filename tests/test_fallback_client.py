@@ -168,10 +168,9 @@ def test_classify_validation_error_terminates_without_fallback():
 
 
 def test_empty_chain_raises():
-    """An empty chain should not be constructable via factory, but the wrapper itself raises."""
-    chain = FallingBackLLMClient([])
-    with pytest.raises(LLMError):
-        chain.classify("halo")
+    """An empty chain should not be constructable — constructor raises immediately."""
+    with pytest.raises(LLMError, match="At least one client"):
+        FallingBackLLMClient([])
 
 
 def test_compose_reply_falls_back_when_primary_fails():
@@ -222,36 +221,46 @@ def test_get_fallback_llm_client_with_valid_backends(monkeypatch):
     assert len(chain._clients) == 2
 
 
-def test_get_fallback_llm_client_missing_credentials_raises():
-    """Factory should raise LLMError if a backend lacks credentials."""
+def test_get_fallback_llm_client_missing_credentials_fallback():
+    """Factory falls back to MockLLMClient when credentials are missing."""
     import os
 
-    # Save current state
-    saved_adacode = os.environ.get("ADACODE_API_KEY")
-    os.environ["ADACODE_API_KEY"] = ""
+    saved_keys = {}
+    for key in ("ADACODE_API_KEY", "GEMINI_API_KEY", "ANTHROPIC_API_KEY"):
+        saved_keys[key] = os.environ.get(key)
+        os.environ[key] = ""  # empty string beats .env in pydantic-settings priority
 
     try:
-        # Force settings re-read by clearing cache
         from app.config import get_settings
         get_settings.cache_clear()
-        with pytest.raises(LLMError, match="ADACODE_API_KEY"):
-            get_fallback_llm_client(["adacode"])
+        client = get_fallback_llm_client(["adacode"])
+        from app.services.llm import MockLLMClient
+        assert isinstance(client, MockLLMClient)
     finally:
-        # Restore
-        if saved_adacode is not None:
-            os.environ["ADACODE_API_KEY"] = saved_adacode
-        else:
-            del os.environ["ADACODE_API_KEY"]
+        for key, val in saved_keys.items():
+            if val is not None:
+                os.environ[key] = val
+            else:
+                os.environ.pop(key, None)
+        from app.config import get_settings
         get_settings.cache_clear()
 
 
-def test_get_fallback_llm_client_unknown_backend_raises():
-    """Factory should raise LLMError on unknown backend name."""
-    with pytest.raises(LLMError, match="Unknown backend"):
-        get_fallback_llm_client(["unknown_provider"])
+def test_get_fallback_llm_client_unknown_backend_fallback():
+    """Factory falls back to MockLLMClient on unknown backend name."""
+    client = get_fallback_llm_client(["unknown_provider"])
+    from app.services.llm import MockLLMClient
+    assert isinstance(client, MockLLMClient)
 
 
-def test_get_fallback_llm_client_empty_list_raises():
-    """Factory should raise LLMError if no backends are provided."""
-    with pytest.raises(LLMError, match="At least one backend"):
-        get_fallback_llm_client([])
+def test_get_fallback_llm_client_empty_list_fallback(monkeypatch):
+    """Factory falls back to MockLLMClient if no backends are provided."""
+    import os
+    monkeypatch.setenv("ADACODE_API_KEY", "")
+    monkeypatch.setenv("GEMINI_API_KEY", "")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "")
+    from app.config import get_settings
+    get_settings.cache_clear()
+    client = get_fallback_llm_client([])
+    from app.services.llm import MockLLMClient
+    assert isinstance(client, MockLLMClient)

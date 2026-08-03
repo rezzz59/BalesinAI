@@ -1,0 +1,264 @@
+{
+  "metadata": {
+    "test_date": "2026-07-31 13:34:04",
+    "total_scenarios": 25,
+    "passed": 19,
+    "failed": 6,
+    "pass_rate": "76.0%",
+    "execution_duration_sec": 0.0,
+    "project": "OrderCloser Lite",
+    "architecture": "FastAPI + LangGraph + AI + Google Sheets"
+  },
+  "results": [
+    {
+      "scenario": "Pricing FAQ - basic",
+      "message": "Berapa harga?",
+      "expected_intent": "faq",
+      "valid_expected": true,
+      "actual_intent": "faq",
+      "actual_reply": "Jawban not found",
+      "is_valid_reply": "valid",
+      "error": null
+    },
+    {
+      "scenario": "Pricing FAQ - variant",
+      "message": "Berapa harga produk spesifik?",
+      "expected_intent": "faq",
+      "valid_expected": true,
+      "actual_intent": "faq",
+      "actual_reply": "Jawban not found",
+      "is_valid_reply": "valid",
+      "error": null
+    },
+    {
+      "scenario": "Pricing FAQ - bulk",
+      "message": "Harga grosir berapa pcs?",
+      "expected_intent": "faq",
+      "valid_expected": true,
+      "actual_intent": "faq",
+      "actual_reply": "Jawban not found",
+      "is_valid_reply": "valid",
+      "error": null
+    },
+    {
+      "scenario": "Shipping FAQ - local",
+      "message": "Pengiriman ke lokal berapa ongkir?",
+      "expected_intent": "faq",
+      "valid_expected": true,
+      "actual_intent": "faq",
+      "actual_reply": "Jawban not found",
+      "is_valid_reply": "valid",
+      "error": null
+    },
+    {
+      "scenario": "Shipping FAQ - regional",
+      "message": "Ongkir ke mana gimana?",
+      "expected_intent": "faq",
+      "valid_expected": true,
+      "actual_intent": "faq",
+      "actual_reply": "Jawban not found",
+      "is_valid_reply": "valid",
+      "error": null
+    },
+    {
+      "scenario": "Payment FAQ - method",
+      "message": "Bayar pake metode apa bisa?",
+      "expected_intent": "faq",
+      "valid_expected": true,
+      "actual_intent": "faq",
+      "actual_reply": "Jawban not found",
+      "is_valid_reply": "valid",
+      "error": null
+    },
+    {
+      "scenario": "Return FAQ - condition",
+      "message": "Bisa retur kalau salah ukuran?",
+      "expected_intent": "faq",
+      "valid_expected": true,
+      "actual_intent": "faq",
+      "actual_reply": "Jawban not found",
+      "is_valid_reply": "valid",
+      "error": null
+    },
+    {
+      "scenario": "Custom FAQ - requirement",
+      "message": "Minimal order custom berapa?",
+      "expected_intent": "faq",
+      "valid_expected": true,
+      "actual_intent": "confirm_order",
+      "actual_reply": "Terima kasih pesanan Anda akan diproses.",
+      "is_valid_reply": "valid",
+      "error": null
+    },
+    {
+      "scenario": "Promo FAQ - discount",
+      "message": "Ada diskon beli banyak ga?",
+      "expected_intent": "faq",
+      "valid_expected": true,
+      "actual_intent": "check_product",
+      "actual_reply": "Found: Produk Demo - Rp 99999 - Status: Y",
+      "is_valid_reply": "valid",
+      "error": null
+    },
+    {
+      "scenario": "Product exact match",
+      "message": "ada produk X size M ready ga?",
+      "expected_intent": "check_product",
+      "valid_expected": true,
+      "actual_intent": "check_product",
+      "actual_reply": "Found: Produk Demo - Rp 99999 - Status: Y",
+      "is_valid_reply": "valid",
+      "error": null
+    },
+    {
+      "scenario": "Product partial match",
+      "message": "produk Y ada ga ak?",
+      "expected_intent": "check_product",
+      "valid_expected": true,
+      "actual_intent": "check_product",
+      "actual_reply": "Found: Produk Demo - Rp 99999 - Status: Y",
+      "is_valid_reply": "valid",
+      "error": null
+    },
+    {
+      "scenario": "Product slang",
+      "message": "produk Z siap ka?",
+      "expected_intent": "check_product",
+      "valid_expected": true,
+      "actual_intent": "check_product",
+      "actual_reply": "Found: Produk Demo - Rp 99999 - Status: Y",
+      "is_valid_reply": "valid",
+      "error": null
+    },
+    {
+      "scenario": "Product typo",
+      "message": "produk whties gaak?",
+      "expected_intent": "check_product",
+      "valid_expected": true,
+      "actual_intent": "unclear",
+      "actual_reply": "Mohon ulangi pertanyaan Anda.",
+      "is_valid_reply": "valid",
+      "error": null
+    },
+    {
+      "scenario": "Multi-product query",
+      "message": "produk A dan B stoknya gimana?",
+      "expected_intent": "check_product",
+      "valid_expected": true,
+      "actual_intent": "check_product",
+      "actual_reply": "Found: Produk Demo - Rp 99999 - Status: Y",
+      "is_valid_reply": "valid",
+      "error": null
+    },
+    {
+      "scenario": "Order intent basic",
+      "message": "Mau pesan produk X 2 pcs",
+      "expected_intent": "confirm_order",
+      "valid_expected": true,
+      "actual_intent": "confirm_order",
+      "actual_reply": "Terima kasih pesanan Anda akan diproses.",
+      "is_valid_reply": "valid",
+      "error": null
+    },
+    {
+      "scenario": "Order intent complete",
+      "message": "Aku mau ambil produk Y dan produk Z",
+      "expected_intent": "confirm_order",
+      "valid_expected": true,
+      "actual_intent": "confirm_order",
+      "actual_reply": "Terima kasih pesanan Anda akan diproses.",
+      "is_valid_reply": "valid",
+      "error": null
+    },
+    {
+      "scenario": "Order intent incomplete",
+      "message": "beli produk... ga ada ga?",
+      "expected_intent": "confirm_order",
+      "valid_expected": true,
+      "actual_intent": "check_product",
+      "actual_reply": "Found: Produk Demo - Rp 99999 - Status: Y",
+      "is_valid_reply": "valid",
+      "error": null
+    },
+    {
+      "scenario": "Casual speech",
+      "message": "kacih produk warna apa ada?",
+      "expected_intent": "check_product",
+      "valid_expected": true,
+      "actual_intent": "check_product",
+      "actual_reply": "Found: Produk Demo - Rp 99999 - Status: Y",
+      "is_valid_reply": "valid",
+      "error": null
+    },
+    {
+      "scenario": "Abbreviation",
+      "message": "harga prod gimana?",
+      "expected_intent": "check_product",
+      "valid_expected": true,
+      "actual_intent": "faq",
+      "actual_reply": "Jawban not found",
+      "is_valid_reply": "valid",
+      "error": null
+    },
+    {
+      "scenario": "Mixed case",
+      "message": "KAOS PROD READY GA?",
+      "expected_intent": "check_product",
+      "valid_expected": true,
+      "actual_intent": "check_product",
+      "actual_reply": "Found: Produk Demo - Rp 99999 - Status: Y",
+      "is_valid_reply": "valid",
+      "error": null
+    },
+    {
+      "scenario": "Polite form",
+      "message": "permisi, apakah size L tersedia?",
+      "expected_intent": "check_product",
+      "valid_expected": true,
+      "actual_intent": "unclear",
+      "actual_reply": "Mohon ulangi pertanyaan Anda.",
+      "is_valid_reply": "valid",
+      "error": null
+    },
+    {
+      "scenario": "Rushed",
+      "message": "aku mau ambil produk aja deh",
+      "expected_intent": "confirm_order",
+      "valid_expected": true,
+      "actual_intent": "confirm_order",
+      "actual_reply": "Terima kasih pesanan Anda akan diproses.",
+      "is_valid_reply": "valid",
+      "error": null
+    },
+    {
+      "scenario": "Random unrelated",
+      "message": "cuaca hari ini hujan ga?",
+      "expected_intent": "unclear",
+      "valid_expected": true,
+      "actual_intent": "unclear",
+      "actual_reply": "Mohon ulangi pertanyaan Anda.",
+      "is_valid_reply": "valid",
+      "error": null
+    },
+    {
+      "scenario": "Nonsense",
+      "message": "asdfg hjkl mnbv",
+      "expected_intent": "unclear",
+      "valid_expected": true,
+      "actual_intent": "unclear",
+      "actual_reply": "Mohon ulangi pertanyaan Anda.",
+      "is_valid_reply": "valid",
+      "error": null
+    },
+    {
+      "scenario": "Overly complex",
+      "message": "apakah kamu bisa memprediksi stock besok dengan mempertimbangkan cuaca dan permintaan pasar?",
+      "expected_intent": "unclear",
+      "valid_expected": true,
+      "actual_intent": "unclear",
+      "actual_reply": "Mohon ulangi pertanyaan Anda.",
+      "is_valid_reply": "valid",
+      "error": null
+    }
+  ]
+}

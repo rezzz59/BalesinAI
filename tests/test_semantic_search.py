@@ -93,7 +93,7 @@ class TestSemanticSearchIntegration:
 
     def test_limit_respected(self, repo, embedding_service):
         """Ensure search returns at most 'limit' items."""
-        vec_unit = np.ones(EMBED_DIM, dtype=np.float32) / np.sqrt(EMBED_DIM)
+        vec_unit = (np.ones(EMBED_DIM, dtype=np.float32) / np.sqrt(EMBED_DIM)).astype(np.float32)
         for i in range(10):
             repo.save("t1", "faq", f"fa{i}", f"FAQ {i}", vec_unit)
 
@@ -106,7 +106,7 @@ class TestSemanticSearchIntegration:
     def test_cosine_similarity_ranking(self, repo, embedding_service):
         """Verify that more similar vectors are ranked higher."""
         # Create three embeddings: one perfect, one slightly less similar, one orthogonal
-        perfect = np.ones(EMBED_DIM, dtype=np.float32) / np.sqrt(EMBED_DIM)
+        perfect = (np.ones(EMBED_DIM, dtype=np.float32) / np.sqrt(EMBED_DIM)).astype(np.float32)
         # Slightly perturbed: set one element different then re-normalize
         perturbed = perfect.copy()
         perturbed[0] -= 0.2
@@ -129,7 +129,7 @@ class TestSemanticSearchIntegration:
 
     def test_tenant_isolation(self, repo, embedding_service):
         """Ensure searches respect tenant boundaries."""
-        vec = np.ones(EMBED_DIM, dtype=np.float32) / np.sqrt(EMBED_DIM)
+        vec = (np.ones(EMBED_DIM, dtype=np.float32) / np.sqrt(EMBED_DIM)).astype(np.float32)
         repo.save("tenantA", "faq", "f1", "Tenant A content", vec)
         repo.save("tenantB", "faq", "f1", "Tenant B content", vec)
 
@@ -144,7 +144,7 @@ class TestSemanticSearchIntegration:
 
     def test_minimum_similarity_filtering(self, repo, embedding_service):
         """Items below min_similarity are excluded."""
-        perfect = np.ones(EMBED_DIM, dtype=np.float32) / np.sqrt(EMBED_DIM)
+        perfect = (np.ones(EMBED_DIM, dtype=np.float32) / np.sqrt(EMBED_DIM)).astype(np.float32)
         ortho = np.zeros(EMBED_DIM, dtype=np.float32)
         ortho[0] = 1.0
 
@@ -164,7 +164,7 @@ class TestSemanticSearchIntegration:
 
     def test_batch_search_aggregates(self, repo, embedding_service):
         """batch_search aggregates results across queries and sources."""
-        v = np.ones(EMBED_DIM, dtype=np.float32) / np.sqrt(EMBED_DIM)
+        v = (np.ones(EMBED_DIM, dtype=np.float32) / np.sqrt(EMBED_DIM)).astype(np.float32)
         repo.save("t1", "faq", "f1", "FAQ here", v)
         repo.save("t1", "catalog", "c1", "Cat entry", v)
 
@@ -202,7 +202,7 @@ def find_mock_client(mock_encode, mock_repo_factory):
 class TestConvenienceFunctions:
     @pytest.fixture
     def unit_vec(self):
-        return np.ones(EMBED_DIM, dtype=np.float32) / np.sqrt(EMBED_DIM)
+        return (np.ones(EMBED_DIM, dtype=np.float32) / np.sqrt(EMBED_DIM)).astype(np.float32)
 
     def test_find_faq_matches(self, repo, embedding_service, unit_vec):
         """find_faq_matches should return at least one match when an item exists."""
@@ -232,4 +232,4 @@ class TestConvenienceFunctions:
 
 @pytest.fixture
 def unit_vec():
-    return np.ones(EMBED_DIM, dtype=np.float32) / np.sqrt(EMBED_DIM)
+    return (np.ones(EMBED_DIM, dtype=np.float32) / np.sqrt(EMBED_DIM)).astype(np.float32)

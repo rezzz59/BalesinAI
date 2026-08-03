@@ -16,6 +16,7 @@ def reset_db():
     engine_mod.reset_engine_for_testing(eng)
     yield
     eng.dispose()
+    engine_mod.reset_engine_for_testing(None)  # restore default engine for later tests
 
 
 def test_tenant_repo_insert_and_get():

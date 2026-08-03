@@ -22,7 +22,7 @@ def test_classify_returns_intent_and_confidence():
     """Successful classification returns intent and confidence."""
     mock_response = _make_mock_response("faq", 0.85)
 
-    with patch("app.services.llm.anthropic.Anthropic") as mock_cls:
+    with patch("anthropic.Anthropic") as mock_cls:
         mock_client = MagicMock()
         mock_client.messages.create.return_value = mock_response
         mock_cls.return_value = mock_client
@@ -38,7 +38,7 @@ def test_classify_handles_invalid_json():
     """If LLM returns non-JSON, raise LLMError."""
     mock_response = _make_mock_response("", 0.0, is_valid_json=False)
 
-    with patch("app.services.llm.anthropic.Anthropic") as mock_cls:
+    with patch("anthropic.Anthropic") as mock_cls:
         mock_client = MagicMock()
         mock_client.messages.create.return_value = mock_response
         mock_cls.return_value = mock_client
@@ -52,7 +52,7 @@ def test_classify_validates_intent_values():
     """Validation rejects invalid intents and out-of-range confidence."""
     mock_response = _make_mock_response("invalid_intent", 0.5)
 
-    with patch("app.services.llm.anthropic.Anthropic") as mock_cls:
+    with patch("anthropic.Anthropic") as mock_cls:
         mock_client = MagicMock()
         mock_client.messages.create.return_value = mock_response
         mock_cls.return_value = mock_client

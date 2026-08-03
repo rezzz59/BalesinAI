@@ -67,20 +67,53 @@ class FonnteGateway(PhoneGateway):
 
                     response.raise_for_status()
                     result = response.json()
-                    if not result.get("status"):
-                        error_msg = result.get("detail", "Unknown Fonnte error")
+                    # LOG FULL RESPONSE FOR DEBUGGING
+                    logger.debug(
+                        "FONNTE_RAW_RESPONSE",
+                        extra={
+                            "phone": phone,
+                            "raw_result": result,
+                            "all_keys": sorted(result.keys()),
+                            "status_value": repr(result.get("status")),
+                            "reason_value": repr(result.get("reason")),
+                            "detail_value": repr(result.get("detail")),
+                        },
+                    )
+                    logger.info(
+                        "fonnte_api_response",
+                        extra={
+                            "phone": phone[-4:],
+                            "response": result,
+                            "status_field": result.get("status"),
+                        },
+                    )
+                    # DEBUG: Check what status field actually exists
+                    if result.get("status") is not True:
+                        logger.debug(
+                            "FONNTE_STATUS_CHECK",
+                            extra={
+                                "status": result.get("status"),
+                                "all_keys": list(result.keys()),
+                                "has_true_status": result.get("status") is True,
+                                "reason_raw": result.get("reason"),
+                                "detail_raw": result.get("detail"),
+                            },
+                        )
+                        error_msg = result.get("reason") or result.get("detail") or "Unknown Fonnte error"
                         raise FonnteError(f"Fonnte API error: {error_msg}")
                     return result
 
                 except FonnteError as e:
                     # Re-raise immediately for client errors (4xx), retry for server errors (5xx)
                     if "client error" in str(e) or (e.__cause__ is None and "4" in str(e)[:20]):
+                        logger.error("FONNTE_CLIENT_ERROR", exc_info=True)
                         raise
                     last_exception = e
                     logger.warning(
                         "fonnte_send_attempt_failed",
                         extra={"attempt": attempt, "phone": phone[-4:], "error": str(e)},
                     )
+                    logger.error("fonnte_exception_occurred", exc_info=True)
                     if attempt < self.max_retries:
                         await asyncio.sleep(0.1 * (2 ** (attempt - 1)))
                 except httpx.HTTPStatusError as e:
