@@ -27,6 +27,7 @@ class ChatState(TypedDict, total=False):
     catalog_answer: str | None
     product_match: dict | None
     match_kind: str | None  # "high" | "medium" | "none" — set by lookup_catalog
+    blueprint_fallback: bool | None  # True when answered from industry blueprint
 
     # Compose output
     reply_text: str

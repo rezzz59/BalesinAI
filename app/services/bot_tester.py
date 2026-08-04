@@ -123,6 +123,7 @@ def dry_run_reply(
         "action": result.get("action"),
         "fallback_reason": result.get("fallback_reason"),
         "match_kind": result.get("match_kind"),
+        "blueprint_fallback": result.get("blueprint_fallback"),
         "order_items": result.get("order_items"),
         "order_total": result.get("order_total"),
         "gateway_calls": list(gateway.calls),

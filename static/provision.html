@@ -69,12 +69,13 @@
             <label class="block text-sm font-medium text-gray-700 mt-3">Nama Toko / Brand</label>
             <input id="merchantName" class="input" placeholder="Contoh: Kopi Nusantara">
             <label class="block text-sm font-medium text-gray-700 mt-3">Jenis Usaha</label>
-            <select id="businessType" class="input">
+            <select id="businessType" class="input" onchange="loadBlueprintPreview()">
                 <option value="jualan">Toko Online / Umum</option>
                 <option value="kuliner">Kuliner / Makanan</option>
                 <option value="fashion">Fashion / Pakaian</option>
                 <option value="klinik">Klinik / Kesehatan</option>
             </select>
+            <div id="blueprintPreview" class="hidden mt-3 text-xs rounded-lg bg-blue-50 text-blue-900 p-3"></div>
             <label class="block text-sm font-medium text-gray-700 mt-3">Nomor WhatsApp Pemilik (untuk follow-up order)</label>
             <input id="ownerWa" class="input" placeholder="08xxxxxxxxxx">
             <label class="block text-sm font-medium text-gray-700 mt-3">API Key Fonnte (opsional — isi kalau sudah punya)</label>
@@ -295,6 +296,7 @@
                     'intent: ' + (data.intent || '—') + ' · confidence: ' +
                     Math.round((data.confidence || 0) * 100) + '%' +
                     (data.fallback_reason ? ' · fallback: ' + data.fallback_reason : '') +
+                    (data.blueprint_fallback ? ' · dijawab template industri' : '') +
                     (data.order_code ? ' · order: ' + data.order_code : ''));
             } catch (e) {
                 appendBubble('⚠️ ' + e.message, 'bot');
@@ -306,6 +308,24 @@
         async function copyTemplate() {
             const url = prompt('Tempel link template kosong di sini (buat salinan via File → Make a copy):', '');
             if (url) { document.getElementById('sheetUrl').value = url; }
+        }
+
+        let BLUEPRINTS = null;
+        async function loadBlueprintPreview() {
+            const box = document.getElementById('blueprintPreview');
+            if (!BLUEPRINTS) {
+                try {
+                    const res = await fetch('/api/provision/blueprints');
+                    if (res.ok) BLUEPRINTS = (await res.json()).blueprints;
+                } catch (e) { return; }
+            }
+            const bt = document.getElementById('businessType').value;
+            const faqs = (BLUEPRINTS && BLUEPRINTS[bt]) || [];
+            if (!faqs.length) { box.classList.add('hidden'); return; }
+            box.classList.remove('hidden');
+            box.innerHTML = '<div class="font-semibold mb-1">Template jawaban untuk ' +
+                document.getElementById('businessType').selectedOptions[0].text + ':</div>' +
+                faqs.map(f => '<div class="mt-1">• <b>' + f.pertanyaan + '</b> — ' + f.jawaban + '</div>').join('');
         }
 
         go(1);

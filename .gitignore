@@ -42,3 +42,6 @@ tmp/
 *.backup
 *.patch
 *.improved
+
+# Scratch notes
+TXT.txt

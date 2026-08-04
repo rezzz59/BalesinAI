@@ -33,7 +33,7 @@ def _to_match_kind(score: float) -> str:
     """Bucket an overlap score into high/medium/none for downstream grading.
 
     Uses thresholds (0.5 high, otherwise >0 medium) so a 1/2 overlap (0.5)
-    counts as a high-confidence FAQ match Ⲉ appropriate when the buyer asks a
+    counts as a high-confidence FAQ match, appropriate when the buyer asks a
     short, specific question.
     """
     if score >= 0.5:
@@ -41,6 +41,39 @@ def _to_match_kind(score: float) -> str:
     if score > 0.0:
         return "medium"
     return "none"
+
+
+def _lookup_blueprint_faq(message: str, tenant_id: str) -> dict | None:
+    """Best-effort match a buyer question against the industry blueprint FAQ.
+
+    Only fires when the tenant's own sheet had no FAQ match. Looks up the
+    tenant's business_type, then scores the message against that industry's
+    generic FAQ rows. Returns the best matching row above FAQ_MATCH_THRESHOLD,
+    or None. Never raises.
+    """
+    try:
+        from app.data.blueprints import BLUEPRINT_FAQS
+        from app.db.tenant_repo import get_tenant
+        from app.services.sheets import FAQ_MATCH_THRESHOLD, _score_faq_row
+
+        tenant = get_tenant(tenant_id)
+        if tenant is None:
+            return None
+        bt = (tenant.get("business_type") or "jualan").strip().lower()
+        rows = BLUEPRINT_FAQS.get(bt) or BLUEPRINT_FAQS["jualan"]
+        best: dict | None = None
+        best_score = 0.0
+        for row in rows:
+            score = _score_faq_row(message, row)
+            if score > best_score:
+                best_score = score
+                best = row
+        if best is not None and best_score >= FAQ_MATCH_THRESHOLD:
+            return best
+        return None
+    except Exception as e:  # noqa: BLE001
+        logger.warning("blueprint_faq_failed", extra={"tenant_id": tenant_id, "error": str(e)})
+        return None
 
 
 def fallback_reason_for(state: ChatState, threshold: float | None = None) -> str | None:
@@ -162,6 +195,19 @@ def lookup_catalog(
         if intent == "faq":
             match = sheets_client.lookup_faq(state["message_text"])
             if match is None:
+                # Fall back to the industry blueprint (generic FAQ) so a store
+                # that hasn't filled its sheet yet can still answer common
+                # questions. Blueprint answers are deliberately generic and
+                # never reference store-specific products/prices.
+                blueprint_match = _lookup_blueprint_faq(state["message_text"], state["tenant_id"])
+                if blueprint_match is not None:
+                    score = _score_faq_row(state["message_text"], blueprint_match)
+                    return {
+                        "catalog_answer": blueprint_match["jawaban"],
+                        "product_match": None,
+                        "match_kind": _to_match_kind(score),
+                        "blueprint_fallback": True,
+                    }
                 logger.info(
                     "faq_no_match",
                     extra={

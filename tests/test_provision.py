@@ -94,6 +94,22 @@ class TestValidateSheet:
         assert "tidak valid" in r.json()["detail"]
 
 
+class TestBlueprints:
+    def test_blueprints_endpoint_ok(self, client, reset_db):
+        r = client.get("/api/provision/blueprints")
+        assert r.status_code == 200
+        data = r.json()
+        assert "kuliner" in data["business_types"]
+        assert data["blueprints"]["kuliner"]
+        assert "pertanyaan" in data["blueprints"]["kuliner"][0]
+
+    def test_blueprint_has_faq_for_each_type(self, client, reset_db):
+        r = client.get("/api/provision/blueprints")
+        data = r.json()
+        for bt in data["business_types"]:
+            assert data["blueprints"][bt], f"blueprint {bt} kosong"
+
+
 class TestCreateTenant:
     def test_create_tenant_ok(self, client, reset_db):
         from app.db.tenant_repo import create_provisioning_token

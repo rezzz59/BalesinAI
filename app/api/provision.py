@@ -283,6 +283,7 @@ async def test_chat(request: Request):
         "action": result.get("action"),
         "fallback_reason": result.get("fallback_reason"),
         "match_kind": result.get("match_kind"),
+        "blueprint_fallback": result.get("blueprint_fallback"),
         "order_items": result.get("order_items"),
         "order_total": result.get("order_total"),
         "order_code": result.get("order_code"),
@@ -331,6 +332,22 @@ async def list_tokens(request: Request):
             }
             for r in rows
         ]
+
+
+@router.get("/blueprints")
+async def provision_blueprints():
+    """Industry blueprints: starter FAQ + catalog samples per business_type.
+
+    Exposed to the provisioning wizard so a merchant can see what FAQ/catalog
+    starter rows their chosen industry provides (and optionally seed their own
+    sheet from it). No auth — informational only.
+    """
+    from app.data.blueprints import available_business_types, get_blueprint
+
+    return {
+        "business_types": available_business_types(),
+        "blueprints": {bt: get_blueprint(bt)["faqs"] for bt in available_business_types()},
+    }
 
 
 @router.get("/tenants")
