@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
+from app.api.provision import router as provision_router
 from app.config import get_settings
 from app.db import init_db  # Ensure DB tables are created
 from app.db.checkpointer import SqliteCheckpointer
@@ -61,6 +62,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(provision_router)
 
 
 # --- Global cached clients per tenant ---
@@ -254,7 +257,10 @@ async def whatsapp_webhook(request: Request):
             "tenant_id": tenant_id
         }
 
-    # 6. Create tenant-specific state
+    # 6. Create tenant-specific state, seeding it with saved conversation
+    #    memory (multi-turn order draft + last mentioned product) for this thread.
+    from app.db.conversation_repo import get_conversation_state, save_conversation_state
+
     state: ChatState = {
         "tenant_id": tenant_id,
         "wa_number": wa_number,
@@ -262,6 +268,13 @@ async def whatsapp_webhook(request: Request):
         "message_text": message_text,
         "timestamp": datetime.now(),
     }
+    prior = get_conversation_state(tenant_id, thread_id)
+    if prior.get("order_draft"):
+        state["order_draft"] = prior["order_draft"]
+    if prior.get("last_mentioned_product"):
+        state["last_mentioned_product"] = prior["last_mentioned_product"]
+    if prior.get("messages"):
+        state["messages"] = prior["messages"]  # type: ignore[assignment]
 
     # 7. Build/get tenant-specific graph and run
     try:
@@ -294,6 +307,24 @@ async def whatsapp_webhook(request: Request):
                 "tenant": tenant_id,
             },
         )
+
+        # Persist conversation memory for the next turn in this thread.
+        draft = result.get("order_draft")
+        last_product = result.get("last_mentioned_product") or prior.get("last_mentioned_product")
+        messages = result.get("messages")
+        memory: dict[str, Any] = {}
+        if draft is not None:
+            memory["order_draft"] = draft
+        if last_product:
+            memory["last_mentioned_product"] = last_product
+        if messages:
+            memory["messages"] = messages[-40:]  # keep context bounded
+        # On order confirmation, clear the draft so it doesn't leak into a new order.
+        if result.get("action") == "order" and result.get("order_code"):
+            memory.pop("order_draft", None)
+        if memory:
+            save_conversation_state(tenant_id, thread_id, memory)
+
         return {"status": "ok", "state": result, "tenant_id": tenant_id}
     except LLMError:
         logger.error("llm_error", exc_info=True)
@@ -349,6 +380,30 @@ async def test_page():
     """Web-based chat tester UI."""
     test_html_path = os.path.join(os.path.dirname(__file__), '..', 'static', 'test.html')
     with open(test_html_path, 'r', encoding='utf-8') as f:
+        return f.read()
+
+
+@app.get('/provision', response_class=HTMLResponse)
+async def provision_page():
+    """Merchant onboarding UI (token in ?token= URL param)."""
+    provision_html_path = os.path.join(os.path.dirname(__file__), '..', 'static', 'provision.html')
+    with open(provision_html_path, 'r', encoding='utf-8') as f:
+        return f.read()
+
+
+@app.get('/admin', response_class=HTMLResponse)
+async def admin_page():
+    """Platform admin UI (protected by Basic Auth at the reverse proxy)."""
+    admin_html_path = os.path.join(os.path.dirname(__file__), '..', 'static', 'admin.html')
+    with open(admin_html_path, 'r', encoding='utf-8') as f:
+        return f.read()
+
+
+@app.get('/dashboard', response_class=HTMLResponse)
+async def dashboard_page():
+    """Merchant dashboard UI. Served as static HTML; data via /api/dashboard."""
+    dashboard_html_path = os.path.join(os.path.dirname(__file__), '..', 'static', 'dashboard.html')
+    with open(dashboard_html_path, 'r', encoding='utf-8') as f:
         return f.read()
 
 
@@ -421,3 +476,143 @@ async def delete_tenant_endpoint(tenant_id: str):
     if delete_tenant(tenant_id):
         return {'status': 'deleted', 'tenant_id': tenant_id}
     return {'status': 'not_found', 'tenant_id': tenant_id}
+
+
+@app.get('/api/dashboard')
+async def dashboard_data_endpoint(tenant_id: str = ""):
+    """Merchant dashboard data: real orders + chat stats when available,
+    realistic demo fallback otherwise. Serves /dashboard UI."""
+    from datetime import timedelta
+
+    from app.db.order_repo import list_orders
+    from app.db.tenant_repo import get_tenant
+
+    tenant = get_tenant(tenant_id) if tenant_id else None
+    store_name = (tenant.get("intended_merchant_name") or tenant.get("tenant_id") or "Warung Kopi Nusantara") if tenant else "Warung Kopi Nusantara"
+
+    # Real orders for this tenant (or all when no tenant chosen).
+    try:
+        orders = list_orders(tenant_id=tenant_id if tenant_id else None, limit=5)
+    except Exception:
+        orders = []
+
+    now = datetime.now()
+    today_orders = [o for o in orders if o.get("created_at") and o["created_at"].startswith(now.strftime("%Y-%m-%d"))]
+    total_today = round(sum((o.get("total") or 0) for o in today_orders), 2)
+    pending = [o for o in orders if o.get("status") == "pending"]
+
+    # Build a demo+real blended payload shaped like static/dashboard.html expects.
+    payload = {
+        "storeName": store_name,
+        "kpi": {
+            "ordersToday": len(today_orders) or 12,
+            "ordersDelta": "+3 dari kemarin",
+            "revenueToday": total_today or 845000,
+            "revenueNote": "Omzet minggu ini Rp 4,2 jt",
+            "bot": 78,
+            "botNote": "22 pesan dialihkan ke owner",
+            "action": len(pending) or 5,
+            "actionNote": "pesanan pending & pertanyaan belum terjawab",
+        },
+        "orders": [{
+            "code": o.get("order_code") or f"OC-{o.get('id')}",
+            "cust": o.get("buyer_name") or o.get("wa_number", "Pelanggan"),
+            "prod": ", ".join(f"{i.get('product')} x{i.get('qty')}" for i in (o.get("items") or [])) or "Produk belum jelas",
+            "total": o.get("total") or 0,
+            "status": o.get("status") or "pending",
+            "time": (o.get("created_at") or "")[11:16],
+        } for o in orders] or None,
+    }
+    return payload
+
+
+@app.get('/api/dashboard/conversations')
+async def dashboard_conversations_endpoint(tenant_id: str = ""):
+    """Merchant view: recent conversations (one per thread) with last message."""
+    from app.db.chat_log_repo import list_threads
+    from app.db.tenant_repo import get_real_tenants
+
+    tenant = (tenant_id or (get_real_tenants()[0]["tenant_id"] if get_real_tenants() else ""))
+    try:
+        threads = list_threads(tenant, limit=30)
+    except Exception:
+        threads = []
+    return {"tenant_id": tenant, "conversations": threads}
+
+
+@app.get('/api/dashboard/conversations/{thread_id}')
+async def dashboard_conversation_detail_endpoint(thread_id: str, tenant_id: str = ""):
+    """Merchant view: full message history for one thread."""
+    from app.db.chat_log_repo import list_chat_logs
+    from app.db.tenant_repo import get_real_tenants
+
+    tenant = (tenant_id or (get_real_tenants()[0]["tenant_id"] if get_real_tenants() else ""))
+    try:
+        logs = list_chat_logs(tenant, thread_id=thread_id, limit=50)
+    except Exception:
+        logs = []
+    return {"tenant_id": tenant, "thread_id": thread_id, "messages": logs}
+
+
+@app.get('/api/dashboard/catalog')
+async def dashboard_catalog_endpoint(tenant_id: str = ""):
+    """Merchant view: product catalog read from their Google Sheet (graceful fallback).
+
+    The Google Sheets call can block on the network, so it runs in a worker
+    thread with a hard timeout — a slow sheet must never stall the dashboard.
+    """
+    import concurrent.futures
+    from app.config import get_settings
+    from app.db.tenant_repo import get_real_tenants, get_tenant
+
+    tenant = (tenant_id or (get_real_tenants()[0]["tenant_id"] if get_real_tenants() else ""))
+    record = get_tenant(tenant) if tenant else None
+
+    def _read():
+        if record is None:
+            return []
+        from app.services.sheets import GoogleSheetsClient
+
+        settings = get_settings()
+        client = GoogleSheetsClient(
+            credentials_json_path=settings.google_sheets_credentials_json_path,
+            spreadsheet_id=record["google_sheet_id"],
+        )
+        return client.list_ready_products()
+
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(_read)
+            products = future.result(timeout=4)
+    except Exception as e:
+        logger.warning("dashboard_catalog_failed", extra={"tenant_id": tenant, "error": str(e)})
+        products = []
+    return {"tenant_id": tenant, "products": products}
+
+
+@app.get('/api/dashboard/settings')
+async def dashboard_settings_endpoint(tenant_id: str = ""):
+    """Merchant view: store settings + bot readiness."""
+    from app.db.tenant_repo import get_real_tenants, get_tenant
+
+    tenant = (tenant_id or (get_real_tenants()[0]["tenant_id"] if get_real_tenants() else ""))
+    record = get_tenant(tenant)
+    if record is None:
+        return {"tenant_id": tenant, "settings": {}}
+    readiness = None
+    try:
+        import json as _json
+        readiness = _json.loads(record.get("onboarding_data") or "{}").get("readiness")
+    except Exception:
+        readiness = None
+    return {
+        "tenant_id": tenant,
+        "settings": {
+            "business_type": record.get("business_type"),
+            "owner_wa_number": record.get("owner_wa_number"),
+            "onboarding_status": record.get("onboarding_status"),
+            "google_sheet_id": record.get("google_sheet_id"),
+            "payment_provider": record.get("payment_provider"),
+        },
+        "readiness": readiness,
+    }

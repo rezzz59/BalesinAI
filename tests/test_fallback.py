@@ -40,10 +40,10 @@ def test_compose_reply_faq_no_match_triggers_fallback():
         def classify_with_history(self, messages):
             return {"intent": "faq", "confidence": 0.5, "has_complaint_signal": False, "sentiment": "neutral"}
 
-        def compose_reply(self, message, retrieved_row, match_kind, customer_context=None):
+        def compose_reply(self, message, retrieved_row, match_kind, customer_context=None, persona=None):
             raise LLMError("down")
 
-        def compose_reply_with_history(self, messages, message, retrieved_row, match_kind, customer_context=None):
+        def compose_reply_with_history(self, messages, message, retrieved_row, match_kind, customer_context=None, persona=None):
             raise LLMError("down")
 
     result = compose_reply(state, llm_client=_Fail())

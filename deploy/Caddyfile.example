@@ -1,0 +1,24 @@
+# OrderCloser Lite — Caddy reverse proxy
+#
+# Protect /admin with Basic Auth. Merchant /provision uses a single-use token in
+# the URL (no login), so it stays open.
+#
+# Create the password hash first:
+#   caddy hash-password --plaintext 'YOUR_ADMIN_PASSWORD'
+#
+# Replace ADMIN_HASH with the output.
+
+your-domain.com {
+    encode zstd gzip
+
+    handle_path /admin/* {
+        basic_auth {
+            admin ADMIN_HASH
+        }
+        reverse_proxy 127.0.0.1:8000
+    }
+
+    handle {
+        reverse_proxy 127.0.0.1:8000
+    }
+}

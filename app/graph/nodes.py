@@ -10,6 +10,25 @@ from app.services.sheets import FAQ_MATCH_THRESHOLD, _score_faq_row
 logger = logging.getLogger(__name__)
 
 
+def _persona_for_tenant(tenant_id: str) -> str | None:
+    """Resolve the store-persona instruction for a tenant's business_type.
+
+    Best-effort: missing tenant or unknown business_type falls back to None so
+    the generic compose prompt is used. Never raises.
+    """
+    try:
+        from app.db.tenant_repo import get_tenant
+        from app.graph.prompts import PERSONA_TEMPLATES, DEFAULT_PERSONA
+
+        tenant = get_tenant(tenant_id)
+        if tenant is None:
+            return DEFAULT_PERSONA
+        return PERSONA_TEMPLATES.get(tenant.get("business_type", "jualan"), DEFAULT_PERSONA)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("persona_resolve_failed", extra={"tenant_id": tenant_id, "error": str(e)})
+        return None
+
+
 def _to_match_kind(score: float) -> str:
     """Bucket an overlap score into high/medium/none for downstream grading.
 
@@ -210,6 +229,7 @@ def lookup_catalog(
                     "catalog_answer": None,
                     "product_match": best_product,
                     "match_kind": _to_match_kind(best_score),
+                    "last_mentioned_product": best_product.get("nama_produk"),
                 }
             # No specific product keyword matched — treat as a catalog-browse
             # request. List all ready products as a deterministic template reply
@@ -284,6 +304,7 @@ def _compose_with_llm(state: ChatState, llm_client: Any) -> dict:
 
     # Get optional customer context for composing context-aware replies
     customer_context = state.get("customer_context")
+    persona = _persona_for_tenant(state["tenant_id"])
 
     # 1. Order confirmation: short template, no LLM.
     if intent == "confirm_order":
@@ -316,6 +337,7 @@ def _compose_with_llm(state: ChatState, llm_client: Any) -> dict:
                 retrieved_row=retrieved_row,
                 match_kind=match_kind,
                 customer_context=customer_context,  # Pass customer context for context-aware replies
+                persona=persona,  # Store-persona instruction per business_type
             )
             validate_reply(reply, retrieved_row)
             # Append to conversation history before returning
@@ -567,6 +589,190 @@ async def fallback_human(state: ChatState, gateway_client: Any) -> dict:
         return {"action": "error"}
 
 
+async def capture_order(
+    state: ChatState,
+    sheets_client: Any,
+    gateway_client: Any,
+    persist_orders: bool = True,
+) -> dict:
+    """Extract, persist, and acknowledge an incoming order.
+
+    Runs on intent == confirm_order. Steps:
+      1. Read catalog + extract items/qty/price + buyer info (no LLM).
+      2. If persist_orders, store the order in the orders table (best-effort).
+      3. Notify the owner with a structured order summary (best-effort).
+      4. Set reply_text = buyer confirmation with item list + total.
+
+    Returns state updates: {reply_text, action:"order", order_id, order_code,
+    order_items, order_total}. Never raises — on any failure it still produces a
+    friendly acknowledgment and, when items couldn't be parsed, the owner is
+    notified to follow up.
+    """
+    from app.services.order_extractor import (
+        compute_total,
+        extract_buyer_info,
+        extract_items,
+        merge_items,
+    )
+
+    tenant_id = state["tenant_id"]
+    message = state.get("message_text", "") or ""
+
+    # Carry the running order draft from previous turns so a buyer can refine
+    # an order across messages ("saya mau kaos hitam" → "tambah hoodie 1").
+    draft = [dict(i) for i in (state.get("order_draft") or [])]
+
+    items: list[dict] = []
+    buyer_name: str | None = None
+    buyer_address: str | None = None
+    total: float | None = None
+    order_id: int | None = None
+    order_code: str | None = None
+
+    try:
+        catalog = sheets_client.read_catalog() if persist_orders or True else []
+        new_items = extract_items(message, catalog)
+        items = merge_items(draft, new_items) if new_items else draft
+        buyer_name, buyer_address = extract_buyer_info(message)
+        total = compute_total(items)
+    except Exception as e:  # noqa: BLE001
+        logger.error(
+            "order_extraction_failed",
+            extra={"tenant_id": tenant_id, "error": str(e)},
+        )
+        items, buyer_name, buyer_address, total = [], None, None, None
+
+    # Persist (best-effort) when enabled. Dry-run (test-chat) skips writes.
+    if persist_orders:
+        try:
+            from app.db.order_repo import insert_order
+
+            stored = insert_order(
+                tenant_id=tenant_id,
+                thread_id=state["thread_id"],
+                wa_number=state["wa_number"],
+                items=items,
+                total=total,
+                buyer_name=buyer_name,
+                buyer_address=buyer_address,
+                raw_message=message,
+                status="pending",
+            )
+            order_id = stored["id"]
+            order_code = stored["order_code"]
+            logger.info(
+                "order_captured",
+                extra={"tenant_id": tenant_id, "order_id": order_id, "order_code": order_code},
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.error("order_insert_failed", extra={"tenant_id": tenant_id, "error": str(e)})
+
+    # Owner notification (best-effort, only when persisting real orders).
+    if persist_orders:
+        try:
+            from app.db.tenant_repo import get_tenant
+
+            tenant = get_tenant(tenant_id)
+            if tenant is not None:
+                owner_msg = _format_owner_order_message(
+                    state, items, total, buyer_name, buyer_address, order_code
+                )
+                await gateway_client.send_message(
+                    phone=tenant["owner_wa_number"],
+                    message=owner_msg,
+                )
+        except Exception as e:  # noqa: BLE001
+            logger.error("order_owner_notify_failed", extra={"tenant_id": tenant_id, "error": str(e)})
+
+    reply = _format_order_confirmation(
+        message, items, total, buyer_name, buyer_address, order_code
+    )
+    return {
+        "reply_text": reply,
+        "action": "order",
+        "order_id": order_id,
+        "order_code": order_code,
+        "order_items": items,
+        "order_total": total,
+        "order_draft": items,
+    }
+
+
+def _format_price(price: float | None) -> str:
+    if price is None:
+        return "Rp ?"
+    if price == int(price):
+        return f"Rp {int(price):,}".replace(",", ".")
+    return f"Rp {price:,.2f}".replace(",", ".")
+
+
+def _format_order_confirmation(
+    message: str,
+    items: list[dict],
+    total: float | None,
+    buyer_name: str | None,
+    buyer_address: str | None,
+    order_code: str | None,
+) -> str:
+    """Buyer-facing acknowledgment. If nothing was extracted, ask for the item."""
+    ref = f" ({order_code})" if order_code else ""
+    if not items:
+        return (
+            f"Noted Kak 🙏 Order kamu tercatat{ref}. "
+            "Sebelum lanjut, boleh sebutkan produk & jumlahnya ya? "
+            "Contoh: 'kaos hitam 2 pcs'. Owner juga akan follow up ya 🙏"
+        )
+    lines = [f"Order diterima{ref}! 🎉", ""]
+    for it in items:
+        qty = it.get("qty", 1)
+        price = it.get("price")
+        subtotal = _format_price(price * qty) if price is not None else None
+        lines.append(f"• {it['product']} x{qty}" + (f" = {subtotal}" if subtotal else ""))
+    if total is not None:
+        lines.append("")
+        lines.append(f"Total: {_format_price(total)}")
+    if buyer_name:
+        lines.append("")
+        lines.append(f"Nama: {buyer_name}")
+    if buyer_address:
+        lines.append(f"Alamat: {buyer_address}")
+    lines.append("")
+    lines.append("Kami kirimkan detailnya ke owner, owner akan konfirmasi ya 🙏")
+    return "\n".join(lines)
+
+
+def _format_owner_order_message(
+    state: ChatState,
+    items: list[dict],
+    total: float | None,
+    buyer_name: str | None,
+    buyer_address: str | None,
+    order_code: str | None,
+) -> str:
+    """Owner-facing structured order summary sent over WhatsApp."""
+    ref = order_code or "-"
+    lines = [f"🧾 ORDER BARU {ref}", f"Pelanggan: {state['wa_number']}", ""]
+    if not items:
+        lines.append("⚠️ Produk tidak bisa dideteksi otomatis:")
+        lines.append(state.get("message_text", ""))
+    else:
+        for it in items:
+            qty = it.get("qty", 1)
+            price = it.get("price")
+            subtotal = _format_price(price * qty) if price is not None else None
+            lines.append(f"• {it['product']} x{qty}" + (f" = {subtotal}" if subtotal else ""))
+        if total is not None:
+            lines.append("")
+            lines.append(f"Total: {_format_price(total)}")
+    if buyer_name:
+        lines.append(f"Nama: {buyer_name}")
+    if buyer_address:
+        lines.append(f"Alamat: {buyer_address}")
+    lines.append("")
+    lines.append(f"Pesan asli: {state.get('message_text', '')}")
+    return "\n".join(lines)
+
+
 def write_chat_log(state: ChatState) -> dict:
     """Persist chat log entry to SQLite. Best-effort, never raises."""
     try:
@@ -586,50 +792,4 @@ def write_chat_log(state: ChatState) -> dict:
     except Exception as e:  # noqa: BLE001
         logger.error("chat_log_insert_failed", extra={"error": str(e)})
     return {}
-
-def _compose_faq_with_llm(state: ChatState, llm_client: Any) -> dict:
-    """Compose friendly FAQ reply using LLM.
-    
-    Takes the raw FAQ answer and rephrases it to be warm, natural, and conversational.
-    """
-    faq_answer = state.get("catalog_answer", "")
-    user_message = state.get("message_text", "")
-    
-    if not faq_answer:
-        return _compose_fallback_message(state, reason="no_faq_data")
-    
-    try:
-        # Build prompt for friendly response
-        prompt = f"""Kamu adalah asisten chatbot ramah untuk klinik. Ubah jawaban FAQ ini menjadi respons yang:
-- Ramah dan hangat (gunakan sapaan seperti "Halo Kak", "Selamat siang")
-- Natural dan conversational, tidak kaku seperti template
-- Menggunakan emoji yang sesuai
-- Tetap informatif dan akurat
-- Singkat (2-4 kalimat)
-
-Pertanyaan user: {user_message}
-Jawaban FAQ: {faq_answer}
-
-Contoh gaya respons yang baik:
-"Halo Kak! 😊 Klinik kami buka setiap hari Senin-Sabtu pukul 08.00-21.00 ya Kak. Untuk hari Minggu buka 09.00-17.00. Bisa datang langsung atau booking via WhatsApp dulu biar gak antri! 🙏"
-
-Respons yang baik:"""
-
-        reply = llm_client.generate(prompt, temperature=0.7)
-        return {
-            "reply_text": reply.strip(),
-            "action": "reply",
-            "intent": "faq",
-            "confidence": 1.0,
-        }
-    except Exception as e:
-        logger.warning(f"LLM FAQ composition failed: {e}, using fallback")
-    
-    # Fallback: polite wrapper
-    return {
-        "reply_text": f"Halo Kak! 😊\n\n{faq_answer}\n\nKalau ada yang mau ditanyakan lagi, Kakak bisa chat kami ya! 🙏",
-        "action": "reply",
-        "intent": "faq",
-        "confidence": 1.0,
-    }
 

@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Onboard Toko — OrderCloser</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: { extend: { colors: { brand: { 500: '#4f46e5', 600: '#4338ca', 700: '#3730a3' } } } }
+        };
+    </script>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <div class="max-w-2xl mx-auto px-4 py-8">
+        <div class="text-center mb-8">
+            <h1 class="text-2xl font-bold text-gray-900">Onboard Toko Online Anda</h1>
+            <p class="text-sm text-gray-500 mt-1">Ikuti langkah berikut — sekitar 5 menit, tanpa coding.</p>
+        </div>
+
+        <!-- Stepper -->
+        <ol id="stepper" class="flex items-center justify-between mb-8 text-xs">
+            <li data-step="1" class="flex-1 text-center"><span class="step-dot">1</span><div>Link</div></li>
+            <li data-step="2" class="flex-1 text-center"><span class="step-dot">2</span><div>Sheets</div></li>
+            <li data-step="3" class="flex-1 text-center"><span class="step-dot">3</span><div>Deteksi</div></li>
+            <li data-step="4" class="flex-1 text-center"><span class="step-dot">4</span><div>Data</div></li>
+            <li data-step="5" class="flex-1 text-center"><span class="step-dot">5</span><div>Buat</div></li>
+            <li data-step="6" class="flex-1 text-center"><span class="step-dot">6</span><div>Test</div></li>
+            <li data-step="7" class="flex-1 text-center"><span class="step-dot">7</span><div>Live!</div></li>
+        </ol>
+
+        <!-- Step 1: Link aktif? -->
+        <section data-panel="1" class="bg-white rounded-xl shadow-sm p-6">
+            <h2 class="text-lg font-semibold mb-2">Step 1 — Link aktif</h2>
+            <p class="text-sm text-gray-600 mb-4">Link Anda sudah aktif. Klik lanjut untuk mulai.</p>
+            <p class="text-xs text-gray-400 mb-4" id="tokenInfo"></p>
+            <button onclick="go(2)" class="btn-primary">Lanjut →</button>
+        </section>
+
+        <!-- Step 2: Sheets URL -->
+        <section data-panel="2" class="hidden bg-white rounded-xl shadow-sm p-6">
+            <h2 class="text-lg font-semibold mb-2">Step 2 — Link Google Sheets</h2>
+            <p class="text-sm text-gray-600 mb-4">
+                Siapkan 1 file Google Sheets berisi <b>daftar FAQ</b> dan <b>katalog produk</b>.
+                Belum punya? <a href="#" onclick="copyTemplate(); return false;" class="text-indigo-600 underline">Salin template ini</a> lalu isi.
+            </p>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Link Google Sheets</label>
+            <input id="sheetUrl" type="url" placeholder="https://docs.google.com/spreadsheets/d/..." class="input" onkeydown="if(event.key==='Enter')detect()">
+            <div id="detectStatus" class="hidden mt-3 text-sm"></div>
+            <div class="flex gap-3 mt-4">
+                <button onclick="go(1)" class="btn-ghost">← Kembali</button>
+                <button onclick="detect()" id="detectBtn" class="btn-primary">Cek Spreadsheet →</button>
+            </div>
+        </section>
+
+        <!-- Step 3: Detection result -->
+        <section data-panel="3" class="hidden bg-white rounded-xl shadow-sm p-6">
+            <h2 class="text-lg font-semibold mb-2">Step 3 — Hasil Deteksi</h2>
+            <div id="detectResult" class="text-sm space-y-3"></div>
+            <div class="flex gap-3 mt-5">
+                <button onclick="go(2)" class="btn-ghost">← Ganti link</button>
+                <button onclick="go(4)" id="toStep4" class="btn-primary" disabled>Lanjut →</button>
+            </div>
+        </section>
+
+        <!-- Step 4: Business data -->
+        <section data-panel="4" class="hidden bg-white rounded-xl shadow-sm p-6">
+            <h2 class="text-lg font-semibold mb-2">Step 4 — Data Toko</h2>
+            <label class="block text-sm font-medium text-gray-700 mt-3">Nama Toko / Brand</label>
+            <input id="merchantName" class="input" placeholder="Contoh: Kopi Nusantara">
+            <label class="block text-sm font-medium text-gray-700 mt-3">Jenis Usaha</label>
+            <select id="businessType" class="input">
+                <option value="jualan">Toko Online / Umum</option>
+                <option value="kuliner">Kuliner / Makanan</option>
+                <option value="fashion">Fashion / Pakaian</option>
+                <option value="klinik">Klinik / Kesehatan</option>
+            </select>
+            <label class="block text-sm font-medium text-gray-700 mt-3">Nomor WhatsApp Pemilik (untuk follow-up order)</label>
+            <input id="ownerWa" class="input" placeholder="08xxxxxxxxxx">
+            <label class="block text-sm font-medium text-gray-700 mt-3">API Key Fonnte (opsional — isi kalau sudah punya)</label>
+            <input id="fonnteKey" type="password" class="input" placeholder="Tinggalkan kosong jika belum">
+            <div id="createStatus" class="hidden mt-3 text-sm"></div>
+            <div class="flex gap-3 mt-5">
+                <button onclick="go(3)" class="btn-ghost">← Kembali</button>
+                <button onclick="createTenant()" id="createBtn" class="btn-primary">Buat Bot Saya →</button>
+            </div>
+        </section>
+
+        <!-- Step 5: Loading -->
+        <section data-panel="5" class="hidden bg-white rounded-xl shadow-sm p-6 text-center py-12">
+            <div class="animate-spin w-10 h-10 border-4 border-indigo-600 border-t-transparent rounded-full mx-auto mb-4"></div>
+            <h2 class="text-lg font-semibold">Membuat bot Anda...</h2>
+            <p class="text-sm text-gray-500 mt-1">Menyimpan data & menyiapkan jawaban otomatis.</p>
+        </section>
+
+        <!-- Step 6: Test Bot -->
+        <section data-panel="6" class="hidden bg-white rounded-xl shadow-sm p-6">
+            <h2 class="text-lg font-semibold mb-1">Step 6 — Coba Bot Anda</h2>
+            <p class="text-sm text-gray-600 mb-3">Kirim pesan seperti pelanggan. Bot akan menjawab di sini — <b>tanpa mengirim ke WhatsApp</b>.</p>
+            <div id="readinessBox" class="hidden text-sm rounded-lg p-3 mb-4"></div>
+            <div id="chatBox" class="h-64 overflow-y-auto bg-gray-50 rounded-lg p-3 mb-3 space-y-2"></div>
+            <div class="flex gap-2">
+                <input id="testMsg" class="input" placeholder="Contoh: ada kopi susu? jam buka jam berapa?"
+                       onkeydown="if(event.key==='Enter')sendTestChat()">
+                <button onclick="sendTestChat()" id="testBtn" class="btn-primary whitespace-nowrap">Kirim</button>
+            </div>
+            <div id="testStatus" class="hidden mt-2 text-sm"></div>
+            <div class="flex gap-3 mt-5">
+                <button onclick="go(4)" class="btn-ghost">← Kembali</button>
+                <button onclick="go(7)" id="goLiveBtn" class="btn-primary">Aktifkan Sekarang →</button>
+            </div>
+        </section>
+
+        <!-- Step 7: Done -->
+        <section data-panel="7" class="hidden bg-white rounded-xl shadow-sm p-6 text-center py-12">
+            <div class="w-16 h-16 rounded-full bg-green-100 text-green-600 flex items-center justify-center text-3xl mx-auto mb-4">✓</div>
+            <h2 class="text-lg font-semibold mb-2">Selamat! Bot Anda sudah aktif 🎉</h2>
+            <p class="text-sm text-gray-600 mb-4">Chatbot sudah siap membalas pesan WhatsApp ke nomor Fonnte Anda.</p>
+            <div id="tenantIdOut" class="bg-gray-50 rounded-lg p-3 text-xs text-gray-700 mb-4"></div>
+            <a href="/test" class="btn-primary inline-block no-underline">Coba Test Chat →</a>
+        </section>
+    </div>
+
+    <style>
+        .input { width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; outline: none; }
+        .input:focus { border-color: #4f46e5; box-shadow: 0 0 0 2px rgba(79,70,229,0.15); }
+        .btn-primary { background: #4f46e5; color: #fff; padding: 10px 18px; border-radius: 8px; font-weight: 600; font-size: 14px; }
+        .btn-primary:hover { background: #4338ca; }
+        .btn-primary:disabled { background: #c7d2fe; cursor: not-allowed; }
+        .btn-ghost { background: transparent; border: 1px solid #d1d5db; color: #374151; padding: 10px 18px; border-radius: 8px; font-weight: 600; font-size: 14px; }
+        .btn-ghost:hover { background: #f9fafb; }
+        .step-dot { display: inline-block; width: 24px; height: 24px; line-height: 24px; border-radius: 9999px; background: #e5e7eb; color: #6b7280; font-weight: 600; margin-bottom: 4px; }
+        #stepper li.active .step-dot { background: #4f46e5; color: #fff; }
+        #stepper li.active { color: #4f46e5; font-weight: 600; }
+        #stepper li.done .step-dot { background: #10b981; color: #fff; }
+    </style>
+
+    <script>
+        const TOKEN = new URLSearchParams(window.location.search).get('token') || '';
+        let sheetValid = false;
+        let spreadsheetId = '';
+        let tenantId = '';
+        let readiness = null;
+
+        function renderReadiness() {
+            const box = document.getElementById('readinessBox');
+            if (!readiness) { box.classList.add('hidden'); return; }
+            box.classList.remove('hidden');
+            const score = readiness.score || 0;
+            const ok = readiness.status === 'ready';
+            const warnings = (readiness.warnings || []).slice(0, 3).map(w => '<div>• ' + w + '</div>').join('');
+            box.className = 'text-sm rounded-lg p-3 mb-4 ' + (ok ? 'bg-green-50 text-green-800' : 'bg-amber-50 text-amber-800');
+            box.innerHTML = '<div class="font-semibold">Skor Kesiapan Bot: ' + score + ' / 100 — ' +
+                (ok ? 'Siap Live ✅' : 'Perlu Review ⚠️') + '</div>' +
+                (warnings ? '<div class="mt-1">' + warnings + '</div>' : '');
+        }
+
+        function go(step) {
+            document.querySelectorAll('[data-panel]').forEach(p => p.classList.add('hidden'));
+            document.querySelector('[data-panel="' + step + '"]').classList.remove('hidden');
+            document.querySelectorAll('#stepper li').forEach(li => {
+                const s = parseInt(li.dataset.step);
+                li.classList.toggle('active', s === step);
+                li.classList.toggle('done', s < step);
+            });
+            window.scrollTo({ top: 0 });
+        }
+
+        function setStatus(elId, kind, text) {
+            const el = document.getElementById(elId);
+            el.classList.remove('hidden');
+            el.className = 'text-sm mt-3 rounded-lg p-3 ' + (
+                kind === 'error' ? 'bg-red-50 text-red-700' :
+                kind === 'ok' ? 'bg-green-50 text-green-700' : 'bg-yellow-50 text-yellow-700'
+            );
+            el.textContent = text;
+        }
+
+        document.getElementById('tokenInfo').textContent =
+            TOKEN ? 'Token aktif tersedia.' : 'Peringatan: token tidak ditemukan di URL.';
+
+        async function detect() {
+            const url = document.getElementById('sheetUrl').value.trim();
+            const btn = document.getElementById('detectBtn');
+            if (!url) { setStatus('detectStatus', 'error', 'Masukkan link Google Sheets dulu.'); return; }
+            btn.disabled = true;
+            btn.textContent = 'Mengecek...';
+            setStatus('detectStatus', 'warn', 'Mengecek spreadsheet...');
+            try {
+                const res = await fetch('/api/provision/validate-sheet', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ sheet_url: url })
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.detail || 'Gagal cek spreadsheet');
+                spreadsheetId = data.spreadsheet_id;
+                sheetValid = true;
+                renderDetect(data);
+                setStatus('detectStatus', 'ok', 'Spreadsheet terbaca. ' + (data.ready ? 'Semua siap!' : 'Ada beberapa catatan di bawah.'));
+                go(3);
+            } catch (e) {
+                sheetValid = false;
+                setStatus('detectStatus', 'error', 'Error: ' + e.message);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Cek Spreadsheet →';
+            }
+        }
+
+        function renderDetect(data) {
+            const box = document.getElementById('detectResult');
+            const esc = s => { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; };
+            const pill = (label, v) =>
+                '<div class="flex justify-between py-1 border-b border-gray-100"><span class="text-gray-500">' + esc(label) +
+                '</span><span class="font-medium">' + esc(String(v)) + '</span></div>';
+            let html = '';
+            html += pill('Tab FAQ', data.faq_tab || '—') + pill('Jumlah FAQ', data.faq_count) + pill('Kolom', (data.faq_columns || []).join(', ') || '—');
+            html += pill('Tab Katalog', data.catalog_tab || '—') + pill('Jumlah Produk', data.catalog_count) + pill('Kolom', (data.catalog_columns || []).join(', ') || '—');
+            if (data.warnings && data.warnings.length) {
+                html += '<div class="mt-3 bg-yellow-50 rounded-lg p-3 text-yellow-800">' +
+                    data.warnings.map(w => '<div>⚠️ ' + esc(w) + '</div>').join('') + '</div>';
+            } else {
+                html += '<div class="mt-3 bg-green-50 rounded-lg p-3 text-green-700">✅ Semua terdeteksi dengan benar.</div>';
+            }
+            box.innerHTML = html;
+            document.getElementById('toStep4').disabled = !data.ready;
+        }
+
+        async function createTenant() {
+            const merchantName = document.getElementById('merchantName').value.trim();
+            const businessType = document.getElementById('businessType').value;
+            const ownerWa = document.getElementById('ownerWa').value.trim();
+            const fonnteKey = document.getElementById('fonnteKey').value.trim();
+            if (!ownerWa) { setStatus('createStatus', 'error', 'Nomor WhatsApp owner wajib diisi.'); return; }
+            const btn = document.getElementById('createBtn');
+            btn.disabled = true;
+            setStatus('createStatus', 'warn', 'Membuat bot...');
+            go(5);
+            try {
+                const res = await fetch('/api/provision/create-tenant', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        token: TOKEN,
+                        sheet_url: document.getElementById('sheetUrl').value.trim(),
+                        merchant_name: merchantName,
+                        business_type: businessType,
+                        owner_wa_number: ownerWa,
+                        fonnte_api_key: fonnteKey
+                    })
+                });
+                const data = await res.json();
+                if (!res.ok) { go(4); throw new Error(data.detail || 'Gagal membuat tenant'); }
+                tenantId = data.tenant_id;
+                readiness = data.readiness || null;
+                document.getElementById('tenantIdOut').textContent = 'Tenant ID: ' + tenantId;
+                renderReadiness();
+                go(6);
+            } catch (e) {
+                go(4);
+                setStatus('createStatus', 'error', 'Error: ' + e.message);
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        function appendBubble(text, from) {
+            const box = document.getElementById('chatBox');
+            const d = document.createElement('div');
+            d.className = 'p-2 rounded-lg max-w-[80%] text-sm ' +
+                (from === 'user' ? 'ml-auto bg-indigo-600 text-white' : 'bg-white border border-gray-200 text-gray-800');
+            d.textContent = text;
+            box.appendChild(d);
+            box.scrollTop = box.scrollHeight;
+        }
+
+        async function sendTestChat() {
+            const msg = document.getElementById('testMsg').value.trim();
+            const btn = document.getElementById('testBtn');
+            if (!msg) return;
+            appendBubble(msg, 'user');
+            document.getElementById('testMsg').value = '';
+            btn.disabled = true;
+            try {
+                const res = await fetch('/api/provision/test-chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ tenant_id: tenantId, message: msg })
+                });
+                const data = await res.json();
+                if (!res.ok) { appendBubble('⚠️ ' + (data.detail || 'Gagal'), 'bot'); return; }
+                appendBubble(data.reply, 'bot');
+                setStatus('testStatus', 'warn',
+                    'intent: ' + (data.intent || '—') + ' · confidence: ' +
+                    Math.round((data.confidence || 0) * 100) + '%' +
+                    (data.fallback_reason ? ' · fallback: ' + data.fallback_reason : '') +
+                    (data.order_code ? ' · order: ' + data.order_code : ''));
+            } catch (e) {
+                appendBubble('⚠️ ' + e.message, 'bot');
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        async function copyTemplate() {
+            const url = prompt('Tempel link template kosong di sini (buat salinan via File → Make a copy):', '');
+            if (url) { document.getElementById('sheetUrl').value = url; }
+        }
+
+        go(1);
+    </script>
+</body>
+</html>

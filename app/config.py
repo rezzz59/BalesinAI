@@ -36,6 +36,7 @@ class Settings(BaseSettings):
     checkpointer_db_path: str = "./data/checkpoints.db"
     log_level: str = "INFO"
     intent_confidence_threshold: float = 0.6
+    bot_readiness_threshold: float = 70  # readiness score (0-100) to mark tenant "ready"
 
 
 @lru_cache(maxsize=1)

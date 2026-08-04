@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin — OrderCloser</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <div class="max-w-3xl mx-auto px-4 py-8">
+        <div class="flex items-center justify-between mb-6">
+            <h1 class="text-2xl font-bold text-gray-900">Admin Panel</h1>
+            <a href="/provision" class="text-sm text-indigo-600 underline">View merchant page</a>
+        </div>
+
+        <!-- Token input -->
+        <section class="bg-white rounded-xl shadow-sm p-6 mb-6">
+            <h2 class="text-lg font-semibold mb-3">Admin Token</h2>
+            <p class="text-xs text-gray-500 mb-3">Sama dengan <code class="bg-gray-100 px-1 rounded">WEBHOOK_AUTH_TOKEN</code> di .env. Disimpan di browser saja.</p>
+            <div class="flex gap-3">
+                <input id="adminToken" type="password" class="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm" placeholder="Masukkan admin token">
+                <button onclick="saveToken()" class="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-semibold">Simpan</button>
+            </div>
+            <div id="tokenStatus" class="hidden mt-3 text-sm"></div>
+        </section>
+
+        <!-- Mint token -->
+        <section class="bg-white rounded-xl shadow-sm p-6 mb-6">
+            <h2 class="text-lg font-semibold mb-3">Buat Link Undangan Merchant</h2>
+            <label class="block text-sm text-gray-600 mb-1">Nama merchant (opsional)</label>
+            <input id="merchantName" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm mb-3" placeholder="Contoh: Kopi Nusantara">
+            <div class="flex gap-3 items-center">
+                <button onclick="mintToken()" class="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-semibold">Buat Link</button>
+                <span id="mintStatus" class="text-sm text-gray-600"></span>
+            </div>
+            <div id="mintResult" class="hidden mt-4 bg-gray-50 rounded-lg p-4 text-xs"></div>
+        </section>
+
+        <!-- Tokens list -->
+        <section class="bg-white rounded-xl shadow-sm p-6 mb-6">
+            <h2 class="text-lg font-semibold mb-3">Daftar Token</h2>
+            <div id="tokensList" class="text-xs"></div>
+        </section>
+
+        <!-- Tenants list -->
+        <section class="bg-white rounded-xl shadow-sm p-6 mb-6">
+            <h2 class="text-lg font-semibold mb-3">Daftar Tenant</h2>
+            <div id="tenantsList" class="text-xs"></div>
+        </section>
+
+        <!-- Orders list -->
+        <section class="bg-white rounded-xl shadow-sm p-6">
+            <h2 class="text-lg font-semibold mb-3">Order Masuk</h2>
+            <div id="ordersList" class="text-xs"></div>
+        </section>
+    </div>
+
+    <script>
+        const storedToken = sessionStorage.getItem('admin_token') || '';
+        let AUTH = storedToken;
+
+        function setStatus(id, kind, text) {
+            const el = document.getElementById(id);
+            el.classList.remove('hidden');
+            el.className = 'mt-3 text-sm rounded-lg p-3 ' + (
+                kind === 'error' ? 'bg-red-50 text-red-700' :
+                kind === 'ok' ? 'bg-green-50 text-green-700' : 'bg-yellow-50 text-yellow-700'
+            );
+            el.textContent = text;
+        }
+
+        function saveToken() {
+            AUTH = document.getElementById('adminToken').value.trim();
+            sessionStorage.setItem('admin_token', AUTH);
+            setStatus('tokenStatus', 'ok', 'Token disimpan.');
+        }
+
+        async function api(path, method, body) {
+            const res = await fetch(path, {
+                method: method,
+                headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + AUTH },
+                body: body ? JSON.stringify(body) : undefined
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.detail || ('HTTP ' + res.status));
+            return data;
+        }
+
+        async function mintToken() {
+            const btn = event.target;
+            btn.disabled = true;
+            document.getElementById('mintStatus').textContent = 'Membuat...';
+            try {
+                const d = await api('/api/provision/tokens', 'POST', {
+                    merchant_name: document.getElementById('merchantName').value.trim()
+                });
+                const base = window.location.origin;
+                const url = base + '/provision?token=' + d.token;
+                const el = document.getElementById('mintResult');
+                el.classList.remove('hidden');
+                el.innerHTML = '<div class="font-semibold mb-2">Link undangan (48 jam, sekali pakai):</div>' +
+                    '<input readonly value="' + url + '" class="w-full px-2 py-1 border border-gray-300 rounded mb-2 text-xs" onclick="this.select()">' +
+                    '<div class="text-gray-500">Expired: ' + (d.expires_at || '-') + '</div>';
+                document.getElementById('mintStatus').textContent = '✓';
+                loadTokens();
+            } catch (e) {
+                document.getElementById('mintStatus').textContent = 'Error: ' + e.message;
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        async function loadTokens() {
+            const el = document.getElementById('tokensList');
+            el.textContent = 'Memuat...';
+            try {
+                const d = await api('/api/provision/tokens', 'GET');
+                const rows = d.map(t =>
+                    '<div class="flex justify-between py-1 border-b border-gray-100"><span>' +
+                    (t.intended_merchant_name || '-') + '</span><span>' +
+                    t.status + ' · ' + (t.created_at || '').slice(0, 16) + ' · exp ' + (t.expires_at || '').slice(0, 16) +
+                    (t.created_tenant_id ? ' · → ' + t.created_tenant_id : '') + '</span></div>'
+                ).join('');
+                el.innerHTML = rows || '<div class="text-gray-400">Belum ada token.</div>';
+            } catch (e) {
+                el.innerHTML = '<div class="text-red-600">Error: ' + e.message + '</div>';
+            }
+        }
+
+        async function loadTenants() {
+            const el = document.getElementById('tenantsList');
+            el.textContent = 'Memuat...';
+            try {
+                const d = await api('/api/provision/tenants', 'GET');
+                const scorePill = t => {
+                    const s = t.readiness && t.readiness.score != null ? t.readiness.score : null;
+                    if (s == null) return '';
+                    return ' · skor <b>' + s + '</b>';
+                };
+                const rows = d.tenants.map(t =>
+                    '<div class="flex justify-between py-1 border-b border-gray-100"><span>' + t.tenant_id + '</span><span>' +
+                    t.business_type + ' · ' + t.onboarding_status + scorePill(t) + ' · ' + (t.fonnte_device_id || 'no-device') + '</span></div>'
+                ).join('');
+                el.innerHTML = rows || '<div class="text-gray-400">Belum ada tenant.</div>';
+            } catch (e) {
+                el.innerHTML = '<div class="text-red-600">Error: ' + e.message + '</div>';
+            }
+        }
+
+        if (AUTH) { loadTokens(); loadTenants(); loadOrders(); }
+
+        async function loadOrders() {
+            const el = document.getElementById('ordersList');
+            el.textContent = 'Memuat...';
+            try {
+                const d = await api('/api/provision/orders', 'GET');
+                const orders = d.orders || [];
+                const rows = orders.map(o => {
+                    const items = (o.items || []).map(i => i.product + ' x' + i.qty).join(', ') || '-';
+                    const total = o.total != null ? 'Rp ' + Number(o.total).toLocaleString('id-ID') : '-';
+                    const statusColors = {pending:'bg-yellow-100 text-yellow-800', confirmed:'bg-blue-100 text-blue-800', paid:'bg-green-100 text-green-800', done:'bg-green-100 text-green-800', cancelled:'bg-red-100 text-red-800'};
+                    const badge = '<span class="px-2 py-0.5 rounded-full ' + (statusColors[o.status] || '') + '">' + o.status + '</span>';
+                    return '<div class="flex flex-col sm:flex-row justify-between py-2 border-b border-gray-100 gap-1">' +
+                        '<span><b>' + o.order_code + '</b> · ' + o.wa_number + ' · ' + items + '</span>' +
+                        '<span>' + badge + ' · ' + total + ' · ' + (o.created_at || '').slice(0, 16) + '</span></div>';
+                }).join('');
+                el.innerHTML = rows || '<div class="text-gray-400">Belum ada order.</div>';
+            } catch (e) {
+                el.innerHTML = '<div class="text-red-600">Error: ' + e.message + '</div>';
+            }
+        }
+    </script>
+</body>
+</html>

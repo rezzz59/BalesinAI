@@ -1,0 +1,730 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ringkasan — Warung Kopi Nusantara</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #F8F7F4;
+    --card: #FFFFFF;
+    --border: #EBE9E3;
+    --ink: #26261F;
+    --ink-2: #4A4A45;
+    --ink-3: #8B8B83;
+    --brand: #2F7FE0;
+    --brand-soft: #E4EEFB;
+    --amber: #B7791F;
+    --amber-soft: #FBF0DC;
+    --red: #C53030;
+    --red-soft: #FBE9E9;
+    --blue-soft: #E5EEFB;
+    --shadow: 0 1px 2px rgba(0,0,0,.05), 0 4px 12px rgba(0,0,0,.04);
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html { -webkit-font-smoothing: antialiased; }
+  body {
+    font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+    background: var(--bg); color: var(--ink);
+    font-size: 14px; line-height: 1.5;
+  }
+  .num { font-variant-numeric: tabular-nums; }
+
+  /* ---------- Layout ---------- */
+  .shell { display:flex; min-height:100vh; }
+  .sidebar {
+    width:220px; background:var(--card); border-right:1px solid var(--border);
+    padding:20px 14px; display:flex; flex-direction:column; gap:4px;
+    position:sticky; top:0; height:100vh; flex-shrink:0;
+  }
+  .brand { display:flex; align-items:center; gap:10px; padding:4px 8px 18px; }
+  .brand-logo {
+    width:32px; height:32px; border-radius:9px; background:var(--brand);
+    color:#fff; display:flex; align-items:center; justify-content:center;
+    font-weight:800; font-size:15px;
+  }
+  .brand b { font-size:15px; letter-spacing:-.2px; }
+  .nav a {
+    display:flex; align-items:center; gap:10px; padding:9px 10px;
+    border-radius:9px; color:var(--ink-2); text-decoration:none; font-weight:500;
+    font-size:13.5px; transition: background .12s, color .12s;
+  }
+  .nav a svg { flex-shrink:0; }
+  .nav a:hover { background:#F2F0EB; color:var(--ink); }
+  .nav a.active { background:var(--brand-soft); color:var(--brand); font-weight:600; }
+  .wa-card {
+    margin-top:auto; border:1px solid var(--border); border-radius:12px;
+    padding:12px; background:#FCFBF8;
+  }
+  .wa-card .row { display:flex; align-items:center; gap:8px; }
+  .wa-dot { width:8px; height:8px; border-radius:50%; background:var(--brand); }
+  .wa-card b { font-size:12.5px; }
+  .wa-card span { font-size:11.5px; color:var(--ink-3); }
+
+  .main { flex:1; min-width:0; padding:24px 32px 48px; }
+  .topbar {
+    display:flex; align-items:center; gap:16px; margin-bottom:24px;
+    flex-wrap:wrap;
+  }
+  .topbar h1 { font-size:20px; font-weight:800; letter-spacing:-.3px; }
+  .topbar .sub { font-size:13px; color:var(--ink-3); }
+  .topbar .spacer { flex:1; }
+  .badge-pro {
+    font-size:11px; font-weight:700; color:var(--brand); background:var(--brand-soft);
+    padding:4px 10px; border-radius:999px;
+  }
+  .btn {
+    display:inline-flex; align-items:center; gap:8px; font-family:inherit;
+    border-radius:9px; border:1px solid var(--border); background:#fff;
+    color:var(--ink); font-weight:600; font-size:13px; padding:9px 14px; cursor:pointer;
+    transition: background .12s, box-shadow .12s, transform .12s;
+  }
+  .btn:hover { background:#F4F2ED; transform:translateY(-1px); }
+  .btn-primary { background:var(--brand); border-color:var(--brand); color:#fff; }
+  .btn-primary:hover { background:#2569C2; }
+  .avatar {
+    width:34px; height:34px; border-radius:50%; background:#DDE7E1;
+    display:flex; align-items:center; justify-content:center; font-weight:700; font-size:13px;
+  }
+
+  /* ---------- Cards ---------- */
+  .card {
+    background:var(--card); border:1px solid var(--border); border-radius:12px;
+    box-shadow:var(--shadow);
+  }
+  .card-pad { padding:20px; }
+
+  .kpi-row { display:grid; grid-template-columns:repeat(4,1fr); gap:16px; margin-bottom:20px; }
+  .kpi {
+    padding:18px 18px 16px; position:relative; overflow:hidden;
+  }
+  .kpi:first-child { grid-row: span 1; }
+  .kpi:last-child { padding-bottom:12px; }
+  .kpi .label { font-size:12px; font-weight:600; color:var(--ink-3); display:flex; align-items:center; gap:6px; }
+  .kpi .label svg { flex-shrink:0; }
+  .kpi .value { font-size:28px; font-weight:800; letter-spacing:-.5px; margin-top:6px; }
+  .kpi .sub { font-size:12px; color:var(--ink-2); margin-top:4px; }
+  .kpi .trend-up { color:var(--brand); font-weight:600; }
+  .kpi .attention { color:var(--red); font-weight:700; }
+  .kpi-mini { display:inline-block; font-size:11.5px; font-weight:700; padding:3px 8px; border-radius:999px; }
+  .bar { height:6px; border-radius:999px; background:#EFEDE7; margin-top:10px; overflow:hidden; }
+  .bar > i { display:block; height:100%; border-radius:999px; background:var(--brand); }
+  .bar.amber > i { background:var(--amber); }
+  .kpi-flag { position:absolute; top:0; right:0; width:44px; height:44px; opacity:.06; }
+  .kpi-flag svg { width:100%; height:100%; }
+
+  /* ---------- Chart ---------- */
+  .chart-head { display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; }
+  .chart-total { font-size:26px; font-weight:800; letter-spacing:-.5px; }
+  .chart-delta { font-size:12.5px; font-weight:700; color:var(--brand); background:var(--brand-soft); padding:3px 8px; border-radius:999px; }
+  .toggle { display:inline-flex; background:#F2F0EB; border-radius:8px; padding:3px; margin-left:auto; }
+  .toggle button {
+    font-family:inherit; border:none; background:transparent; padding:6px 12px;
+    font-size:12.5px; font-weight:600; color:var(--ink-3); border-radius:6px; cursor:pointer;
+  }
+  .toggle button.on { background:#fff; color:var(--ink); box-shadow:0 1px 3px rgba(0,0,0,.08); }
+  .bars { display:flex; align-items:flex-end; gap:14px; height:200px; margin-top:18px; padding-top:8px; }
+  .bars .col { flex:1; display:flex; flex-direction:column; align-items:center; gap:8px; height:100%; justify-content:flex-end; position:relative; }
+  .bars .pill {
+    width:100%; max-width:44px; border-radius:6px 6px 3px 3px; background:var(--brand);
+    opacity:.9; transition: background .15s; cursor:pointer;
+  }
+  .bars .pill.peak { background:var(--brand); }
+  .bars .col:hover .pill { background:#2569C2; }
+  .bars .day { font-size:11.5px; color:var(--ink-3); font-weight:600; }
+  .tooltip {
+    position:absolute; bottom:calc(100% + 8px); left:50%; transform:translateX(-50%);
+    background:var(--ink); color:#fff; font-size:11.5px; padding:6px 10px; border-radius:8px;
+    white-space:nowrap; opacity:0; pointer-events:none; transition:opacity .12s; z-index:5;
+  }
+  .bars .col:hover .tooltip { opacity:1; }
+
+  /* ---------- Two-column ---------- */
+  .grid2 { display:grid; grid-template-columns:1.6fr 1fr; gap:16px; margin-bottom:20px; }
+  .grid2-eq { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  .card-title { font-size:14px; font-weight:700; margin-bottom:14px; display:flex; align-items:center; justify-content:space-between; }
+
+  /* table */
+  table.orders { width:100%; border-collapse:collapse; }
+  .orders th {
+    text-align:left; font-size:11px; font-weight:700; text-transform:uppercase;
+    letter-spacing:.4px; color:var(--ink-3); padding:8px 10px; border-bottom:1px solid var(--border);
+  }
+  .orders td { padding:11px 10px; border-bottom:1px solid #F3F1EC; font-size:13px; }
+  .orders tr:last-child td { border-bottom:none; }
+  .orders tr:hover td { background:#FBF9F5; }
+  .order-code { font-weight:700; color:var(--ink-2); font-size:12.5px; }
+  .cust { font-weight:600; }
+  .prod { color:var(--ink-2); font-size:12.5px; }
+  .total { font-weight:700; }
+  .time { color:var(--ink-3); font-size:12px; }
+  .status { display:inline-block; font-size:11px; font-weight:700; padding:3px 9px; border-radius:999px; }
+  .s-pending { background:var(--amber-soft); color:var(--amber); }
+  .s-confirmed { background:var(--blue-soft); color:#2B6CB0; }
+  .s-paid { background:var(--brand-soft); color:var(--brand); }
+  .s-done { background:#E7EFE8; color:#2F6B3A; }
+  .s-cancelled { background:#F0EFEC; color:var(--ink-3); }
+  .dots { color:var(--ink-3); background:none; border:none; cursor:pointer; padding:2px 6px; border-radius:6px; font-size:15px; line-height:1; }
+  .dots:hover { background:#F0EFE9; }
+  .link { color:var(--brand); font-weight:600; font-size:13px; text-decoration:none; }
+  .link:hover { text-decoration:underline; }
+  .foot-link { margin-top:12px; }
+
+  /* metrics list */
+  .metric { display:flex; align-items:center; justify-content:space-between; padding:10px 0; border-bottom:1px solid #F3F1EC; }
+  .metric:last-of-type { border-bottom:none; }
+  .metric .m-label { color:var(--ink-2); font-size:13px; }
+  .metric .m-val { font-weight:700; font-size:14px; }
+  .metric .m-note { font-size:12px; color:var(--ink-3); }
+  .missing-q { font-size:12.5px; color:var(--ink-2); padding:6px 0; border-bottom:1px dashed #EEE; }
+  .missing-q a { color:var(--brand); text-decoration:none; font-weight:600; }
+  .missing-q:last-child { border-bottom:none; }
+  .missing-q .q { display:block; }
+  .missing-q .why { color:var(--ink-3); font-size:11.5px; }
+
+  /* activity feed */
+  .feed { display:flex; flex-direction:column; }
+  .feed-item { display:flex; gap:12px; padding:11px 0; border-bottom:1px solid #F3F1EC; }
+  .feed-item:last-child { border-bottom:none; }
+  .feed-ic { width:30px; height:30px; border-radius:8px; flex-shrink:0; display:flex; align-items:center; justify-content:center; }
+  .feed-ic.a { background:var(--brand-soft); color:var(--brand); }
+  .feed-ic.b { background:var(--red-soft); color:var(--red); }
+  .feed-ic.c { background:var(--blue-soft); color:#2B6CB0; }
+  .feed-ic.d { background:var(--amber-soft); color:var(--amber); }
+  .feed-item .f-text { font-size:13px; color:var(--ink-2); }
+  .feed-item .f-text b { color:var(--ink); font-weight:600; }
+  .feed-item .f-time { font-size:11.5px; color:var(--ink-3); }
+
+  /* top products */
+  .top-prod { display:flex; flex-direction:column; gap:13px; }
+  .tp { display:grid; grid-template-columns:1fr auto; gap:2px 12px; align-items:center; }
+  .tp .name { font-weight:600; font-size:13px; }
+  .tp .cnt { font-size:12px; color:var(--ink-3); font-weight:600; }
+  .tp .tbar { grid-column:1 / -1; height:5px; border-radius:999px; background:#EFEDE7; overflow:hidden; margin-top:3px; }
+  .tp .tbar > i { display:block; height:100%; border-radius:999px; background:var(--brand); }
+
+  /* states */
+  .skeleton { background:#EDEBE4; border-radius:8px; animation:pulse 1.4s ease-in-out infinite; }  @keyframes pulse { 0%,100%{opacity:.5} 50%{opacity:.95} }
+  .hidden { display:none !important; }
+  .empty { text-align:center; padding:36px 20px; color:var(--ink-3); }
+  .empty svg { margin-bottom:10px; }
+  .empty b { display:block; color:var(--ink-2); font-size:14px; margin-bottom:4px; }
+  .empty span { font-size:13px; }
+
+  .menu-bar { display:none; }
+  .sidebar.collapsed { width:64px; }
+  .sidebar.collapsed .brand b, .sidebar.collapsed .nav a span, .sidebar.collapsed .wa-card { display:none; }
+  .sidebar.collapsed .nav a { justify-content:center; }
+
+  @media (max-width:1024px) {
+    .kpi-row { grid-template-columns:repeat(2,1fr); }
+    .grid2, .grid2-eq { grid-template-columns:1fr; }
+  }
+  @media (max-width:768px) {
+    .main { padding:16px; }
+    .menu-bar {
+      display:flex; align-items:center; gap:10px; margin-bottom:14px;
+    }
+    .menu-bar button { background:none; border:none; font-size:20px; cursor:pointer; padding:4px 8px; }
+    .sidebar { position:fixed; left:-240px; top:0; bottom:0; z-index:50; transition:left .2s; }
+    .sidebar.open { left:0; box-shadow:0 0 0 100vmax rgba(0,0,0,.3); }
+    .kpi-row { grid-template-columns:repeat(2,1fr); gap:12px; }
+    .topbar h1 { font-size:18px; }
+    .topbar .btn-primary span { display:none; }
+  }
+  @media (max-width:480px) {
+    .kpi-row { grid-template-columns:1fr 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="shell">
+
+  <!-- Sidebar -->
+  <aside class="sidebar" id="sidebar">
+    <div class="brand">
+      <div class="brand-logo">OC</div>
+      <b>OrderCloser</b>
+    </div>
+    <nav class="nav">
+      <a href="#" data-view="dashboard" class="active" onclick="showView('dashboard');return false;">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>
+        <span>Ringkasan</span>
+      </a>
+      <a href="#" data-view="orders" onclick="showView('orders');return false;">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6h15l-1.5 8.5a2 2 0 0 1-2 1.5H8.5a2 2 0 0 1-2-1.8L5 3H2"/><circle cx="9" cy="20" r="1"/><circle cx="18" cy="20" r="1"/></svg>
+        <span>Pesanan</span>
+      </a>
+      <a href="#" data-view="convos" onclick="showView('convos');return false;">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        <span>Percakapan</span>
+      </a>
+      <a href="#" data-view="catalog" onclick="showView('catalog');return false;">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8l-9-5-9 5v8l9 5 9-5V8z"/><path d="M3 8l9 5 9-5"/><path d="M12 13v8"/></svg>
+        <span>Katalog</span>
+      </a>
+      <a href="#" data-view="settings" onclick="showView('settings');return false;">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        <span>Pengaturan</span>
+      </a>
+    </nav>
+    <div class="wa-card">
+      <div class="row">
+        <span class="wa-dot"></span>
+        <b>Bot aktif</b>
+      </div>
+      <span>+62 812-3456-7890</span>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <div class="main">
+    <div class="menu-bar">
+      <button onclick="toggleSidebar()" aria-label="Buka menu">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="20" y2="18"/></svg>
+      </button>
+      <b>OrderCloser</b>
+    </div>
+
+    <div class="topbar">
+      <div>
+        <h1 id="storeName">Warung Kopi Nusantara</h1>
+        <div class="sub">Selasa, 3 Juni 2026 · <span id="todayLabel">Hari ini</span></div>
+      </div>
+      <span class="badge-pro">Paket Pro</span>
+      <div class="spacer"></div>
+      <button class="btn btn-primary">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        <span>Tambah Produk</span>
+      </button>
+      <div class="avatar" title="Pemilik toko">AK</div>
+    </div>
+
+    <!-- KPI -->
+    <div id="view-dashboard">
+
+    <div class="kpi-row" id="kpiRow">
+      <div class="card kpi">
+        <div class="kpi-flag"><svg viewBox="0 0 44 44" fill="currentColor"><path d="M0 44 44 0 0 0 44 44z" transform="rotate(0)"/></svg></div>
+        <div class="label"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2l3 6H6l-3 4 3-4H3L6 2z"/><rect x="9" y="9" width="13" height="11" rx="2"/></svg> Pesanan hari ini</div>
+        <div class="value num" id="kpiOrders">–</div>
+        <div class="sub"><span class="trend-up" id="kpiOrdersDelta">+3 dari kemarin</span></div>
+      </div>
+
+      <div class="card kpi">
+        <div class="label"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8"/><path d="M12 6v2m0 8v2"/></svg> Pendapatan hari ini</div>
+        <div class="value num" id="kpiRevenue">–</div>
+        <div class="sub" id="kpiRevenueNote">Omzet minggu ini Rp 4,2 jt</div>
+      </div>
+
+      <div class="card kpi" style="background:#FDFCF7">
+        <div class="label"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M9 12l2 2 4-4"/></svg> Dibalas bot</div>
+        <div class="value num" id="kpiBot">–</div>
+        <div class="sub" id="kpiBotNote">22 pesan dialihkan ke owner</div>
+        <div class="bar amber"><i id="kpiBotBar" style="width:0%"></i></div>
+      </div>
+
+      <div class="card kpi" style="padding-bottom:12px">
+        <div class="label"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4"/><path d="M12 16h.01"/></svg> Butuh tindakan</div>
+        <div class="value num attention" id="kpiAction">–</div>
+        <div class="sub" id="kpiActionNote">pesanan pending & pertanyaan belum terjawab</div>
+      </div>
+    </div>
+
+    <!-- Chart -->
+    <div class="card card-pad" style="margin-bottom:20px">
+      <div class="chart-head">
+        <div>
+          <div class="chart-total num" id="chartTotal">Rp 5,8 jt</div>
+          <div style="margin-top:2px"><span class="chart-delta" id="chartDelta">+12% dari minggu lalu</span></div>
+        </div>
+        <div class="toggle">
+          <button id="tg7" class="on" onclick="setRange(7)">7 hari</button>
+          <button id="tg30" onclick="setRange(30)">30 hari</button>
+        </div>
+      </div>
+      <div class="bars" id="chartBars"></div>
+    </div>
+
+    <!-- Orders + Bot health -->
+    <div class="grid2">
+      <div class="card card-pad">
+        <div class="card-title">Pesanan Terbaru
+          <a href="#" class="link">Lihat semua →</a>
+        </div>
+        <table class="orders">
+          <thead>
+            <tr><th>Kode</th><th>Pelanggan</th><th>Produk</th><th>Total</th><th>Status</th><th>Waktu</th><th></th></tr>
+          </thead>
+          <tbody id="ordersBody"></tbody>
+        </table>
+      </div>
+
+      <div class="card card-pad">
+        <div class="card-title">Kesehatan Bot</div>
+        <div id="botHealth"></div>
+        <div style="margin-top:8px">
+          <div class="card-title" style="font-size:12.5px; margin-bottom:6px">Belum ada jawabannya</div>
+          <div id="missingQ"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Activity + top products -->
+    <div class="grid2-eq">
+      <div class="card card-pad">
+        <div class="card-title">Aktivitas</div>
+        <div class="feed" id="feed"></div>
+      </div>
+
+      <div class="card card-pad">
+        <div class="card-title">Produk Terlaris</div>
+        <div class="top-prod" id="topProducts"></div>
+      </div>
+    </div>
+    </div><!-- /view-dashboard -->
+
+    <!-- ============ VIEW: Pesanan ============ -->
+    <div id="view-orders" class="hidden">
+      <div class="card card-pad">
+        <div class="card-title">Semua Pesanan
+          <span style="font-size:12px;color:var(--ink-3);font-weight:500" id="ordersCount"></span>
+        </div>
+        <table class="orders">
+          <thead>
+            <tr><th>Kode</th><th>Pelanggan</th><th>Produk</th><th>Total</th><th>Status</th><th>Waktu</th></tr>
+          </thead>
+          <tbody id="allOrdersBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ============ VIEW: Percakapan ============ -->
+    <div id="view-convos" class="hidden">
+      <div class="card card-pad">
+        <div class="card-title">Percakapan
+          <span style="font-size:12px;color:var(--ink-3);font-weight:500" id="convosCount"></span>
+        </div>
+        <div id="convosList" class="feed"></div>
+      </div>
+    </div>
+
+    <!-- ============ VIEW: Katalog ============ -->
+    <div id="view-catalog" class="hidden">
+      <div class="card card-pad">
+        <div class="card-title">Katalog Produk
+          <span style="font-size:12px;color:var(--ink-3);font-weight:500" id="catalogCount"></span>
+        </div>
+        <table class="orders">
+          <thead><tr><th>Produk</th><th>Harga</th><th>Stok</th><th>Deskripsi</th></tr></thead>
+          <tbody id="catalogBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ============ VIEW: Pengaturan ============ -->
+    <div id="view-settings" class="hidden">
+      <div class="grid2-eq">
+        <div class="card card-pad">
+          <div class="card-title">Toko</div>
+          <div id="settingsBody" class="metric-stack"></div>
+        </div>
+        <div class="card card-pad">
+          <div class="card-title">Kesehatan Bot</div>
+          <div id="settingsBot" class="metric-stack"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ============================================================
+   API — data contoh realistis. Ganti dengan endpoint nyata.
+   ============================================================ */
+const DEMO = {
+  storeName: "Warung Kopi Nusantara",
+  today: "Selasa, 3 Juni 2026",
+  kpi: {
+    ordersToday: 12, ordersDelta: "+3 dari kemarin",
+    revenueToday: 845000, revenueNote: "Omzet minggu ini Rp 4,2 jt",
+    bot: 78, botNote: "22 pesan dialihkan ke owner",
+    action: 5, actionNote: "pesanan pending & pertanyaan belum terjawab"
+  },
+  chart7: [
+    { d: "Sen", label: "Senin · 26 Mei", v: 620000, n: 9 },
+    { d: "Sel", label: "Selasa · 27 Mei", v: 580000, n: 8 },
+    { d: "Rab", label: "Rabu · 28 Mei", v: 710000, n: 11 },
+    { d: "Kam", label: "Kamis · 29 Mei", v: 690000, n: 10 },
+    { d: "Jum", label: "Jumat · 30 Mei", v: 1150000, n: 16, peak: true },
+    { d: "Sab", label: "Sabtu · 31 Mei", v: 940000, n: 13 },
+    { d: "Min", label: "Minggu · 1 Jun", v: 1120000, n: 15, peak: true }
+  ],
+  chart30Total: "Rp 19,4 jt",
+  chartDelta: "+12% dari minggu lalu",
+  orders: [
+    { code: "OC-4821", cust: "Budi Santoso", prod: "Kopi Susu x2 · Es Teh x1", total: 42000, status: "pending", time: "10:24" },
+    { code: "OC-4820", cust: "Rina Wulandari", prod: "Roti Bakar Coklat x2", total: 38000, status: "confirmed", time: "09:58" },
+    { code: "OC-4819", cust: "Dedi Kurniawan", prod: "Nasi Goreng Spesial", total: 25000, status: "paid", time: "09:31" },
+    { code: "OC-4818", cust: "Sari Puspita", prod: "Es Teh x4", total: 20000, status: "done", time: "08:47" },
+    { code: "OC-4817", cust: "Agus Wijaya", prod: "Pisang Goreng x3", total: 15000, status: "cancelled", time: "08:12" }
+  ],
+  botHealth: [
+    { label: "Dijawab otomatis", val: "78%", note: "5 dari 23 pesan butuh owner" },
+    { label: "Waktu balas rata-rata", val: "< 1 menit", note: "sepanjang hari ini" },
+    { label: "Skor kesiapan bot", val: "85/100", note: "naik dari 78", bar: 85 },
+    { label: "Tanya yang dibalas manual", val: "3", note: "butuh tambah jawaban" }
+  ],
+  missingQ: [
+    { q: "Jam buka hari libur?", why: "3x ditanya minggu ini" },
+    { q: "Bisa kredit / tempo?", why: "2x ditanya" },
+    { q: "Harga borongan untuk acara?", why: "1x ditanya" }
+  ],
+  feed: [
+    { ic: "a", time: "10:24", html: "Pesanan baru <b>#OC-4821</b> — Budi Santoso" },
+    { ic: "b", time: "10:02", html: "Komplain dialihkan: <b>pesanan belum sampai 3 hari</b>" },
+    { ic: "c", time: "09:40", html: "Jawaban baru ditambahkan: <b>ongkir ke Bali</b>" },
+    { ic: "d", time: "09:12", html: "Bot uji: skor naik <b>78 → 85</b>" }
+  ],
+  topProducts: [
+    { name: "Kopi Susu", cnt: 24 },
+    { name: "Es Teh", cnt: 19 },
+    { name: "Roti Bakar", cnt: 12 },
+    { name: "Pisang Goreng", cnt: 9 }
+  ]
+};
+
+let RANGE = 7;
+
+/* ---------- status helpers ---------- */
+const STATUS = {
+  pending:     { txt: "Dipesan",    cls: "s-pending" },
+  confirmed:   { txt: "Dikonfirmasi", cls: "s-confirmed" },
+  paid:        { txt: "Dibayar",    cls: "s-paid" },
+  done:        { txt: "Selesai",    cls: "s-done" },
+  cancelled:   { txt: "Batal",      cls: "s-cancelled" }
+};
+const rupiah = n => "Rp " + n.toLocaleString("id-ID");
+const shortRupiah = n => n >= 1000000 ? "Rp " + (n/1000000).toLocaleString("id-ID", {maximumFractionDigits:1}) + " jt" : rupiah(n);
+
+function esc(s) { const d = document.createElement("div"); d.textContent = s; return d.innerHTML; }
+
+/* ---------- render ---------- */
+function renderKPI(d) {
+  document.getElementById("storeName").textContent = d.storeName;
+  document.getElementById("kpiOrders").textContent = d.kpi.ordersToday;
+  document.getElementById("kpiOrdersDelta").textContent = d.kpi.ordersDelta;
+  document.getElementById("kpiRevenue").textContent = shortRupiah(d.kpi.revenueToday);
+  document.getElementById("kpiRevenueNote").textContent = d.kpi.revenueNote;
+  document.getElementById("kpiBot").textContent = d.kpi.bot + "%";
+  document.getElementById("kpiBotNote").textContent = d.kpi.botNote;
+  document.getElementById("kpiBotBar").style.width = d.kpi.bot + "%";
+  document.getElementById("kpiAction").textContent = d.kpi.action;
+  document.getElementById("kpiActionNote").textContent = d.kpi.actionNote;
+}
+
+function renderChart() {
+  const data = RANGE === 7 ? DEMO.chart7 : DEMO.chart7.slice(-7);
+  const total = RANGE === 7 ? DEMO.chart7.reduce((s,b)=>s+b.v,0) : DEMO.chart30Total;
+  document.getElementById("chartTotal").textContent = RANGE === 7 ? shortRupiah(total) : total;
+  document.getElementById("chartDelta").textContent = DEMO.chartDelta;
+  document.getElementById("tg7").classList.toggle("on", RANGE===7);
+  document.getElementById("tg30").classList.toggle("on", RANGE===30);
+
+  const max = Math.max(...data.map(b=>b.v));
+  document.getElementById("chartBars").innerHTML = data.map(b => {
+    const h = Math.max(4, Math.round(b.v/max*100));
+    return '<div class="col">' +
+      '<div class="tooltip num">' + esc(b.label) + ' · <b>' + shortRupiah(b.v) + '</b> · ' + b.n + ' pesanan</div>' +
+      '<div class="pill' + (b.peak?' peak':'') + '" style="height:' + h + '%" title=""></div>' +
+      '<div class="day">' + esc(b.d) + '</div></div>';
+  }).join("");
+}
+
+function renderBotHealth(d) {
+  document.getElementById("botHealth").innerHTML = d.botHealth.map(m => {
+    const bar = m.bar != null ? '<div class="bar"><i style="width:' + m.bar + '%"></i></div>' : '';
+    return '<div class="metric"><div><div class="m-label">' + esc(m.label) + '</div><div class="m-note">' + esc(m.note) + '</div></div>' +
+      '<div class="m-val num" style="text-align:right">' + esc(m.val) + '</div>' + bar + '</div>';
+  }).join("");
+  document.getElementById("missingQ").innerHTML = d.missingQ.map(m =>
+    '<div class="missing-q"><span class="q">“' + esc(m.q) + '”</span><span class="why">' + esc(m.why) + ' · <a href="#">Tambah jawaban</a></span></div>'
+  ).join("");
+}
+
+function renderFeed(d) {
+  document.getElementById("feed").innerHTML = d.feed.map(f =>
+    '<div class="feed-item"><div class="feed-ic ' + f.ic + '">' + ICONS[f.ic] + '</div>' +
+    '<div><div class="f-text">' + f.html + '</div><div class="f-time">' + f.time + '</div></div></div>'
+  ).join("");
+}
+
+function renderTop(d) {
+  const max = Math.max(...d.topProducts.map(p=>p.cnt));
+  document.getElementById("topProducts").innerHTML = d.topProducts.map(p =>
+    '<div class="tp"><span class="name">' + esc(p.name) + '</span><span class="cnt">' + p.cnt + '</span>' +
+    '<div class="tbar"><i style="width:' + Math.round(p.cnt/max*100) + '%"></i></div></div>'
+  ).join("");
+}
+
+const ICONS = {
+  a: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2l3 6H6l-3 4 3-4H3L6 2z"/><rect x="9" y="9" width="13" height="11" rx="2"/></svg>',
+  b: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.3 3.9l-8.5 14.8a2 2 0 0 0 1.7 3h17.5a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>',
+  c: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>',
+  d: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>'
+};
+
+function setRange(r) { RANGE = r; renderChart(); }
+function toggleSidebar() { document.getElementById("sidebar").classList.toggle("open"); }
+
+/* ---------- Load data: real via API, fallback to demo ---------- */
+async function init() {
+  let d = DEMO;
+  const tenant = new URLSearchParams(window.location.search).get("tenant_id") || "";
+  try {
+    const res = await fetch("/api/dashboard" + (tenant ? ("?tenant_id=" + encodeURIComponent(tenant)) : ""));
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.kpi) {
+        d = Object.assign({}, DEMO, data);
+        if (!d.orders) d.orders = DEMO.orders;
+      }
+    }
+  } catch (e) { /* pakai demo */ }
+
+  renderKPI(d);
+  renderOrderTable(d);
+  renderBotHealth(d);
+  renderFeed(d);
+  renderTop(d);
+  renderChart();
+}
+
+/* Render order table separately so real data (possibly empty) is handled. */
+function renderOrderTable(d) {
+  const rows = d.orders.map(o => {
+    const st = STATUS[o.status] || STATUS.pending;
+    return '<tr>' +
+      '<td class="order-code">' + esc(o.code) + '</td>' +
+      '<td class="cust">' + esc(o.cust) + '</td>' +
+      '<td class="prod">' + esc(o.prod) + '</td>' +
+      '<td class="total num">' + rupiah(o.total) + '</td>' +
+      '<td><span class="status ' + st.cls + '">' + st.txt + '</span></td>' +
+      '<td class="time">' + esc(o.time) + '</td>' +
+      '<td><button class="dots" aria-label="Aksi order">⋯</button></td>' +
+      '</tr>';
+  }).join("");
+  document.getElementById("ordersBody").innerHTML = rows ||
+    '<tr><td colspan="7"><div class="empty">' +
+    '<svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#B8B6AE" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2l3 6H6l-3 4 3-4H3L6 2z"/><rect x="9" y="9" width="13" height="11" rx="2" opacity=".5"/></svg>' +
+    '<b>Belum ada pesanan masuk</b><span>Share nomor WA bot ke pelanggan ya — order akan muncul di sini.</span></div></td></tr>';
+}
+
+renderKPI(DEMO);
+renderOrderTable(DEMO);
+renderBotHealth(DEMO);
+renderFeed(DEMO);
+renderTop(DEMO);
+renderChart();
+init();
+
+/* ============================================================
+   Multi-view navigation + data loading
+   ============================================================ */
+let CURRENT_TENANT = new URLSearchParams(window.location.search).get("tenant_id") || "";
+const TENANT_QS = () => CURRENT_TENANT ? ("?tenant_id=" + encodeURIComponent(CURRENT_TENANT)) : "";
+
+function showView(name) {
+  document.querySelectorAll("[data-view]").forEach(a => {
+    a.classList.toggle("active", a.dataset.view === name);
+  });
+  ["dashboard","orders","convos","catalog","settings"].forEach(v => {
+    document.getElementById("view-" + v).classList.toggle("hidden", v !== name);
+  });
+  document.getElementById("sidebar").classList.remove("open");
+  if (name === "orders") loadOrders();
+  if (name === "convos") loadConvos();
+  if (name === "catalog") loadCatalog();
+  if (name === "settings") loadSettings();
+  window.scrollTo({ top: 0 });
+}
+
+async function fetchJson(path) {
+  try {
+    const r = await fetch(path);
+    return r.ok ? await r.json() : null;
+  } catch (e) { return null; }
+}
+
+async function loadOrders() {
+  const d = await fetchJson("/api/dashboard" + TENANT_QS());
+  const orders = (d && d.orders && d.orders.length) ? d.orders : DEMO.orders;
+  document.getElementById("ordersCount").textContent = orders.length + " pesanan";
+  const rows = orders.map(o => {
+    const st = STATUS[o.status] || STATUS.pending;
+    return '<tr>' +
+      '<td class="order-code">' + esc(o.code) + '</td>' +
+      '<td class="cust">' + esc(o.cust) + '</td>' +
+      '<td class="prod">' + esc(o.prod) + '</td>' +
+      '<td class="total num">' + rupiah(o.total) + '</td>' +
+      '<td><span class="status ' + st.cls + '">' + st.txt + '</span></td>' +
+      '<td class="time">' + esc(o.time) + '</td></tr>';
+  }).join("");
+  document.getElementById("allOrdersBody").innerHTML = rows ||
+    '<tr><td colspan="6"><div class="empty"><b>Belum ada pesanan</b><span>Order dari pelanggan akan muncul di sini.</span></div></td></tr>';
+}
+
+async function loadConvos() {
+  const d = await fetchJson("/api/dashboard/conversations" + TENANT_QS());
+  const convos = (d && d.conversations && d.conversations.length) ? d.conversations : [];
+  document.getElementById("convosCount").textContent = convos.length + " percakapan";
+  document.getElementById("convosList").innerHTML = convos.map(c => {
+    const t = (c.timestamp || "").slice(0,16).replace("T"," ");
+    const intent = c.intent || "-";
+    return '<div class="feed-item">' +
+      '<div class="feed-ic c"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></div>' +
+      '<div class="f-text"><b>' + esc(c.wa_number || c.thread_id) + '</b> · <span style="color:var(--ink-3)">' + esc(intent) + '</span><br>' +
+      esc((c.last_message || "").slice(0,60)) + '</div>' +
+      '<div class="f-time" style="margin-left:auto">' + t + '</div></div>';
+  }).join("") || '<div class="empty"><b>Belum ada percakapan</b><span>Pesan dari pelanggan akan muncul di sini.</span></div>';
+}
+
+async function loadCatalog() {
+  const d = await fetchJson("/api/dashboard/catalog" + TENANT_QS());
+  const products = (d && d.products && d.products.length) ? d.products : [];
+  document.getElementById("catalogCount").textContent = products.length + " produk ready";
+  const rows = products.map(p => {
+    const harga = p.get ? "" : (p.harga || p.price || "-");
+    return '<tr>' +
+      '<td class="cust">' + esc(p.nama_produk || p.product || "-") + '</td>' +
+      '<td class="num">' + esc(harga) + '</td>' +
+      '<td><span class="status s-paid">Ready</span></td>' +
+      '<td class="prod">' + esc((p.deskripsi || p.desc || "").slice(0,50)) + '</td></tr>';
+  }).join("");
+  document.getElementById("catalogBody").innerHTML = rows ||
+    '<tr><td colspan="4"><div class="empty"><b>Katalog kosong</b><span>Tambahkan produk di Google Sheet — akan muncul di sini.</span></div></td></tr>';
+}
+
+async function loadSettings() {
+  const d = await fetchJson("/api/dashboard/settings" + TENANT_QS());
+  const s = (d && d.settings) || {};
+  const rt = (d && d.readiness) || {};
+  const metric = (k,v) => '<div class="metric"><span class="m-label">' + k + '</span><span class="m-val num">' + esc(String(v ?? "-")) + '</span></div>';
+  const bt = { "jualan":"Toko Online / Umum", "kuliner":"Kuliner / Makanan", "fashion":"Fashion / Pakaian", "klinik":"Klinik / Kesehatan" };
+  document.getElementById("settingsBody").innerHTML =
+    metric("Jenis usaha", bt[s.business_type] || s.business_type) +
+    metric("Nomor WA owner", s.owner_wa_number) +
+    metric("Status bot", s.onboarding_status) +
+    metric("Google Sheet", s.google_sheet_id ? (s.google_sheet_id.slice(0,18) + "…") : "-");
+  document.getElementById("settingsBot").innerHTML =
+    metric("Skor kesiapan", (rt.score != null ? rt.score + "/100" : "-")) +
+    metric("Pesan dibalas bot", rt.containment_rate != null ? Math.round(rt.containment_rate*100) + "%" : "-") +
+    metric("Jumlah fallback", rt.fallbacks ?? "-") +
+    metric("Pertanyaan golden terjawab", rt.golden_hits ?? "-");
+}
+</script>
+</body>
+</html>

@@ -32,11 +32,11 @@ class _OkLLM(LLMClient):
         self.classify_call_count += 1
         return self.classify(messages[-1]["content"] if messages else "")
 
-    def compose_reply(self, message, retrieved_row, match_kind, customer_context=None):
+    def compose_reply(self, message, retrieved_row, match_kind, customer_context=None, persona=None):
         self.compose_call_count += 1
         return f"reply-from-{self._label}"
 
-    def compose_reply_with_history(self, messages, message, retrieved_row, match_kind, customer_context=None):
+    def compose_reply_with_history(self, messages, message, retrieved_row, match_kind, customer_context=None, persona=None):
         self.compose_call_count += 1
         return self.compose_reply(message, retrieved_row, match_kind)
 
@@ -57,11 +57,11 @@ class _FailingLLM(LLMClient):
         self.classify_call_count += 1
         raise LLMError(self._msg)
 
-    def compose_reply(self, message, retrieved_row, match_kind, customer_context=None):
+    def compose_reply(self, message, retrieved_row, match_kind, customer_context=None, persona=None):
         self.compose_call_count += 1
         raise LLMError(self._msg)
 
-    def compose_reply_with_history(self, messages, message, retrieved_row, match_kind, customer_context=None):
+    def compose_reply_with_history(self, messages, message, retrieved_row, match_kind, customer_context=None, persona=None):
         self.compose_call_count += 1
         raise LLMError(self._msg)
 
@@ -85,11 +85,11 @@ class _ValidationLLM(LLMClient):
         self.classify_call_count += 1
         raise LLMValidationError("invalid")
 
-    def compose_reply(self, message, retrieved_row, match_kind, customer_context=None):
+    def compose_reply(self, message, retrieved_row, match_kind, customer_context=None, persona=None):
         self.compose_call_count += 1
         raise LLMValidationError("invalid")
 
-    def compose_reply_with_history(self, messages, message, retrieved_row, match_kind, customer_context=None):
+    def compose_reply_with_history(self, messages, message, retrieved_row, match_kind, customer_context=None, persona=None):
         self.compose_call_count += 1
         raise LLMValidationError("invalid")
 

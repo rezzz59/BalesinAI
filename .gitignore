@@ -35,3 +35,10 @@ htmlcov/
 # Egg info / build
 ordercloser_lite.egg-info/
 OrderCloser_Lite_PRD_Final.md
+
+# Local tooling / scratch
+opencode.json
+tmp/
+*.backup
+*.patch
+*.improved

@@ -44,6 +44,32 @@ STOPWORDS_ID = frozenset({
 # higher drops short legitimate queries.
 FAQ_MATCH_THRESHOLD = 0.3
 
+# --- Flexible tab discovery (multi-tenant onboarding) ---
+# Merchants can name their tabs & columns anything they like. We infer the
+# intended tab type from tab-name keywords first, then from header keywords.
+FAQ_TAB_KEYWORDS = ("faq", "pertanyaan", "qna", "tanya", "question")
+CATALOG_TAB_KEYWORDS = (
+    "katalog", "produk", "product", "catalog", "catalogue",
+    "barang", "item", "menu",
+)
+
+# Canonical column name -> accepted aliases (normalized: lowercase, stripped of
+# non-alphanumeric). Used to map a merchant's spreadsheet onto the internal
+# keys that lookup/embedding code expects.
+FAQ_COL_MAP = {
+    "pertanyaan": ["pertanyaan", "question", "q", "tanya", "pertanyaann"],
+    "jawaban": ["jawaban", "answer", "a", "response", "reply", "respon"],
+}
+CATALOG_COL_MAP = {
+    "nama_produk": ["nama_produk", "nama", "produk", "product", "productname", "item", "barang", "nama product"],
+    "harga": ["harga", "price", "hrg", "harga jual"],
+    "ready": ["ready", "stok", "stock", "status", "tersedia", "ketersediaan", "stockstatus"],
+    "deskripsi": ["deskripsi", "desc", "description", "detail", "keterangan", "kategori"],
+}
+
+# Values treated as "in stock" for the 'ready' column across merchant sheets.
+READY_TRUE_VALUES = frozenset({"y", "yes", "ya", "ada", "ready", "tersedia", "1", "true", "t"})
+
 
 def _tokenize_meaningful(text: str) -> set[str]:
     """Lowercase, split into words >=3 chars, drop Indonesian stopwords."""
@@ -85,6 +111,48 @@ def _score_faq_row(message: str, row: dict) -> float:
     return base_score
 
 
+def parse_sheet_url(url: str) -> str | None:
+    """Extract spreadsheet ID from a Google Sheets share URL.
+
+    Accepts the long share URL and returns the 44-char id, or None if the URL
+    isn't a spreadsheet link.
+    """
+    if not url:
+        return None
+    m = re.search(r"/spreadsheets/d/([a-zA-Z0-9_-]+)", url)
+    return m.group(1) if m else None
+
+
+def _normalize_header(h: str) -> str:
+    """Lowercase and strip punctuation so 'Product Name' == 'product_name'."""
+    return re.sub(r"[^a-z0-9]+", "", (h or "").strip().lower())
+
+
+def _infer_tab_type(title: str, headers: list[str]) -> str:
+    """Infer whether a tab is FAQ, catalog, or unknown.
+
+    Tab-name keywords win (strong signal, e.g. 'FAQ'), then header keywords.
+    """
+    t = title.strip().lower()
+    for kw in FAQ_TAB_KEYWORDS:
+        if kw in t:
+            return "faq"
+    for kw in CATALOG_TAB_KEYWORDS:
+        if kw in t:
+            return "catalog"
+
+    norm_headers = {_normalize_header(h) for h in headers}
+    faq_cols = {_normalize_header(a) for aliases in FAQ_COL_MAP.values() for a in aliases}
+    cat_cols = {_normalize_header(a) for aliases in CATALOG_COL_MAP.values() for a in aliases}
+    if norm_headers & faq_cols and norm_headers & cat_cols:
+        return "catalog"
+    if norm_headers & faq_cols:
+        return "faq"
+    if norm_headers & cat_cols:
+        return "catalog"
+    return "unknown"
+
+
 class SheetsError(Exception):
     """Raised when Sheets API call fails."""
 
@@ -104,6 +172,7 @@ class GoogleSheetsClient:
         self._spreadsheet: Any = None
         self._cache: dict[str, tuple[float, list[dict[str, str]]]] = {}
         self._lock = Lock()
+        self._discovered: dict[str, str | None] | None = None
 
     def _get_spreadsheet(self):
         if self._spreadsheet is None:
@@ -181,17 +250,75 @@ class GoogleSheetsClient:
             except Exception as e:
                 raise SheetsError(f"Failed to read tab {tab_name}: {e}") from e
 
+    def discover_tabs(self) -> list[dict]:
+        """Scan every worksheet and report its inferred type + headers.
+
+        Returns a list of dicts:
+          {title, inferred_type ('faq'|'catalog'|'unknown'), headers, row_count}
+        Discovery result is cached so provisioning & lookups stay cheap.
+        """
+        if self._discovered is not None:
+            return self._discovered
+
+        sheet = self._get_spreadsheet()
+        found: list[dict] = []
+        for ws in sheet.worksheets():
+            raw = ws.get_all_values()
+            headers = [h for h in (raw[0] if raw else []) if h]
+            row_count = max(0, len(raw) - 1) if raw else 0
+            found.append({
+                "title": ws.title,
+                "inferred_type": _infer_tab_type(ws.title, headers),
+                "headers": headers,
+                "row_count": row_count,
+            })
+        self._discovered = found
+        return found
+
+    def find_tab(self, kind: str) -> str | None:
+        """Return the worksheet title for kind ('faq'|'catalog'), or None."""
+        for tab in self.discover_tabs():
+            if tab["inferred_type"] == kind:
+                return tab["title"]
+        return None
+
+    @staticmethod
+    def _canonicalize_row(row: dict, col_map: dict) -> dict:
+        """Rename a row's alias columns to canonical keys.
+
+        Example: {'Question': 'Harga?', 'Answer': 'Rp50k'}
+          -> {'pertanyaan': 'Harga?', 'jawaban': 'Rp50k'}
+        Non-mapped columns are passed through untouched.
+        """
+        lookup: dict[str, str] = {}
+        for canonical, aliases in col_map.items():
+            for a in aliases:
+                lookup[_normalize_header(a)] = canonical
+        out: dict = {}
+        for k, v in row.items():
+            canonical = lookup.get(_normalize_header(str(k)), k)
+            out[canonical] = v
+        return out
+
     def read_faq(self) -> list[dict[str, str]]:
-        return self._read_tab("FAQ")
+        tab = self.find_tab("faq") or "FAQ"
+        return [
+            self._canonicalize_row(r, FAQ_COL_MAP)
+            for r in self._read_tab(tab)
+        ]
 
     def read_catalog(self) -> list[dict[str, str]]:
-        return self._read_tab("Katalog")
+        tab = self.find_tab("catalog") or "Katalog"
+        return [
+            self._canonicalize_row(r, CATALOG_COL_MAP)
+            for r in self._read_tab(tab)
+        ]
 
     def list_ready_products(self) -> list[dict[str, str]]:
-        """Return catalog rows where ready == 'Y' (case-insensitive)."""
+        """Return catalog rows where ready indicates in-stock (case-insensitive)."""
         return [
             r for r in self.read_catalog()
-            if (r.get("ready") or "").strip().upper() == "Y"
+            if (r.get("ready") or "").strip().lower() in READY_TRUE_VALUES
         ]
 
     def lookup_faq(self, message: str) -> dict[str, str] | None:
@@ -223,6 +350,7 @@ class GoogleSheetsClient:
         """Test helper: clear the cache."""
         with self._lock:
             self._cache.clear()
+        self._discovered = None
 
 
 def score_match_kind(message: str, row: dict | None) -> str:

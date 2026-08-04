@@ -62,6 +62,7 @@ class LLMClient(metaclass=abc.ABCMeta):
         retrieved_row: dict | None,
         match_kind: str,
         customer_context: dict | None = None,
+        persona: str | None = None,
     ) -> str:
         """Compose natural Indonesian reply grounded in retrieved_row (if any).
 
@@ -71,6 +72,8 @@ class LLMClient(metaclass=abc.ABCMeta):
           match_kind: 'high' | 'medium' | 'none'.
           customer_context: optional dict from analyze_customer_context with
             mapped_conditions, issue_type, primary_intent, confidence, reasoning.
+          persona: optional store-persona instruction text prepended to the
+            compose system prompt (per business_type).
 
         Returns the composed reply text. May raise LLMError.
         """
@@ -84,6 +87,7 @@ class LLMClient(metaclass=abc.ABCMeta):
         retrieved_row: dict | None,
         match_kind: str,
         customer_context: dict | None = None,
+        persona: str | None = None,
     ) -> str:
         """Compose reply with full conversation history.
 
@@ -98,6 +102,8 @@ class LLMClient(metaclass=abc.ABCMeta):
           match_kind: 'high' | 'medium' | 'none' — contextual quality hint
           customer_context: optional dict from analyze_customer_context with
             mapped_conditions, issue_type, primary_intent, confidence, reasoning
+          persona: optional store-persona instruction text prepended to the
+            compose system prompt (per business_type).
 
         Returns the composed reply text. May raise LLMError.
         """
@@ -139,6 +145,7 @@ class MockLLMClient(LLMClient):
         retrieved_row: dict | None,
         match_kind: str,
         customer_context: dict | None = None,
+        persona: str | None = None,
     ) -> str:
         """Provide a deterministic dummy reply that mirrors source-row facts."""
         if not retrieved_row:
@@ -165,9 +172,10 @@ class MockLLMClient(LLMClient):
         retrieved_row: dict | None,
         match_kind: str,
         customer_context: dict | None = None,
+        persona: str | None = None,
     ) -> str:
         """Multi-turn aware dummy reply."""
-        return self.compose_reply(message, retrieved_row, match_kind, customer_context)
+        return self.compose_reply(message, retrieved_row, match_kind, customer_context, persona)
 
 
 class AdaCodeLLMClient(LLMClient):
@@ -279,9 +287,10 @@ class AdaCodeLLMClient(LLMClient):
         retrieved_row: dict | None,
         match_kind: str,
         customer_context: dict | None = None,
+        persona: str | None = None,
     ) -> str:
         """Compose reply grounded in retrieved row via AdaCode."""
-        return self._compose(message, retrieved_row, match_kind, customer_context, with_history=False)
+        return self._compose(message, retrieved_row, match_kind, customer_context, persona, with_history=False)
 
     def compose_reply_with_history(
         self,
@@ -290,13 +299,14 @@ class AdaCodeLLMClient(LLMClient):
         retrieved_row: dict | None,
         match_kind: str,
         customer_context: dict | None = None,
+        persona: str | None = None,
     ) -> str:
         """Compose reply with history via AdaCode."""
-        return self._compose(message, retrieved_row, match_kind, customer_context, with_history=True, messages=messages)
+        return self._compose(message, retrieved_row, match_kind, customer_context, persona, with_history=True, messages=messages)
 
-    def _compose(self, message, retrieved_row, match_kind, customer_context, with_history=False, messages=None):
+    def _compose(self, message, retrieved_row, match_kind, customer_context, persona=None, with_history=False, messages=None):
         """Internal compose via chat completions."""
-        prompt = self._build_compose_prompt(message, retrieved_row, match_kind, customer_context, with_history=with_history, messages=messages)
+        prompt = self._build_compose_prompt(message, retrieved_row, match_kind, customer_context, persona, with_history=with_history, messages=messages)
         try:
             text = self._chat(prompt, [], max_tokens=1024)
         except LLMValidationError:
@@ -311,7 +321,7 @@ class AdaCodeLLMClient(LLMClient):
             raise LLMError(f"Unexpected AdaCode compose error: {e}") from e
         return self._parse_reply(text)
 
-    def _build_compose_prompt(self, message, retrieved_row, match_kind, customer_context, with_history=False, messages=None):
+    def _build_compose_prompt(self, message, retrieved_row, match_kind, customer_context, persona=None, with_history=False, messages=None):
         """Build compose prompt for AdaCode."""
         if match_kind == "none":
             system = COMPOSE_NOMATCH_SYSTEM
@@ -321,6 +331,8 @@ class AdaCodeLLMClient(LLMClient):
             system = COMPOSE_STRICT_SYSTEM
 
         prompt = system + "\n\n"
+        if persona:
+            prompt += f"{persona}\n\n"
         if with_history and messages:
             history = "\n".join(
                 f"{m.get('role', 'user')}: {m.get('content', '')}" for m in messages
@@ -403,10 +415,11 @@ class GeminiLLMClient(LLMClient):
         retrieved_row: dict | None,
         match_kind: str,
         customer_context: dict | None = None,
+        persona: str | None = None,
     ) -> str:
         """Compose reply via Gemini."""
         try:
-            prompt = self._build_compose_prompt(message, retrieved_row, match_kind, customer_context, with_history=False)
+            prompt = self._build_compose_prompt(message, retrieved_row, match_kind, customer_context, persona, with_history=False)
             text = self._model.generate_content(prompt).text
         except LLMError:
             raise
@@ -421,10 +434,11 @@ class GeminiLLMClient(LLMClient):
         retrieved_row: dict | None,
         match_kind: str,
         customer_context: dict | None = None,
+        persona: str | None = None,
     ) -> str:
         """Compose reply with history via Gemini."""
         try:
-            prompt = self._build_compose_prompt(message, retrieved_row, match_kind, customer_context, with_history=True, messages=messages)
+            prompt = self._build_compose_prompt(message, retrieved_row, match_kind, customer_context, persona, with_history=True, messages=messages)
             text = self._model.generate_content(prompt).text
         except LLMError:
             raise
@@ -432,7 +446,7 @@ class GeminiLLMClient(LLMClient):
             raise LLMError(f"Gemini compose_reply_with_history error: {e}") from e
         return self._parse_reply(text)
 
-    def _build_compose_prompt(self, message, retrieved_row, match_kind, customer_context, with_history=False, messages=None):
+    def _build_compose_prompt(self, message, retrieved_row, match_kind, customer_context, persona=None, with_history=False, messages=None):
         """Build compose prompt for Gemini."""
         if match_kind == "none":
             system = COMPOSE_NOMATCH_SYSTEM
@@ -442,6 +456,8 @@ class GeminiLLMClient(LLMClient):
             system = COMPOSE_STRICT_SYSTEM
 
         prompt = system + "\n\n"
+        if persona:
+            prompt += f"{persona}\n\n"
         if with_history and messages:
             history = "\n".join(
                 f"{m.get('role', 'user')}: {m.get('content', '')}" for m in messages
@@ -539,10 +555,11 @@ class AnthropicLLMClient(LLMClient):
         retrieved_row: dict | None,
         match_kind: str,
         customer_context: dict | None = None,
+        persona: str | None = None,
     ) -> str:
         """Compose reply via Anthropic Claude."""
         try:
-            prompt = self._build_compose_prompt(message, retrieved_row, match_kind, customer_context, with_history=False)
+            prompt = self._build_compose_prompt(message, retrieved_row, match_kind, customer_context, persona, with_history=False)
             response = self._client.messages.create(
                 model=self._model,
                 max_tokens=1024,
@@ -562,10 +579,11 @@ class AnthropicLLMClient(LLMClient):
         retrieved_row: dict | None,
         match_kind: str,
         customer_context: dict | None = None,
+        persona: str | None = None,
     ) -> str:
         """Compose reply with history via Anthropic Claude."""
         try:
-            prompt = self._build_compose_prompt(message, retrieved_row, match_kind, customer_context, with_history=True, messages=messages)
+            prompt = self._build_compose_prompt(message, retrieved_row, match_kind, customer_context, persona, with_history=True, messages=messages)
             response = self._client.messages.create(
                 model=self._model,
                 max_tokens=1024,
@@ -578,7 +596,7 @@ class AnthropicLLMClient(LLMClient):
             raise LLMError(f"Anthropic compose_reply_with_history error: {e}") from e
         return self._parse_reply(text)
 
-    def _build_compose_prompt(self, message, retrieved_row, match_kind, customer_context, with_history=False, messages=None):
+    def _build_compose_prompt(self, message, retrieved_row, match_kind, customer_context, persona=None, with_history=False, messages=None):
         """Build compose prompt for Anthropic."""
         if match_kind == "none":
             system = COMPOSE_NOMATCH_SYSTEM
@@ -588,6 +606,8 @@ class AnthropicLLMClient(LLMClient):
             system = COMPOSE_STRICT_SYSTEM
 
         prompt = system + "\n\n"
+        if persona:
+            prompt += f"{persona}\n\n"
         if with_history and messages:
             history = "\n".join(
                 f"{m.get('role', 'user')}: {m.get('content', '')}" for m in messages
@@ -654,11 +674,12 @@ class FallingBackLLMClient(LLMClient):
         retrieved_row: dict | None,
         match_kind: str,
         customer_context: dict | None = None,
+        persona: str | None = None,
     ) -> str:
         """Compose reply using fallback chain."""
         for i, client in enumerate(self._clients):
             try:
-                result = client.compose_reply(message, retrieved_row, match_kind, customer_context)
+                result = client.compose_reply(message, retrieved_row, match_kind, customer_context, persona)
                 logger.info(f"FallingBackLLMClient: compose_reply succeeded with {type(client).__name__} (attempt {i+1}/{len(self._clients)})")
                 return result
             except LLMValidationError:
@@ -677,11 +698,12 @@ class FallingBackLLMClient(LLMClient):
         retrieved_row: dict | None,
         match_kind: str,
         customer_context: dict | None = None,
+        persona: str | None = None,
     ) -> str:
         """Compose reply with history and fallback."""
         for i, client in enumerate(self._clients):
             try:
-                result = client.compose_reply_with_history(messages, message, retrieved_row, match_kind, customer_context)
+                result = client.compose_reply_with_history(messages, message, retrieved_row, match_kind, customer_context, persona)
                 logger.info(f"FallingBackLLMClient: compose_reply_with_history succeeded with {type(client).__name__} (attempt {i+1}/{len(self._clients)})")
                 return result
             except LLMValidationError:
@@ -825,19 +847,19 @@ class _SafeLLMClientWrapper(LLMClient):
             logger.warning(f"All backends failed, using MockLLMClient")
             return MockLLMClient().classify_with_history(messages)
     
-    def compose_reply(self, message: str, retrieved_row: dict | None, match_kind: str, customer_context: dict | None = None) -> str:
+    def compose_reply(self, message: str, retrieved_row: dict | None, match_kind: str, customer_context: dict | None = None, persona: str | None = None) -> str:
         try:
-            return self._wrapped.compose_reply(message, retrieved_row, match_kind, customer_context)
+            return self._wrapped.compose_reply(message, retrieved_row, match_kind, customer_context, persona)
         except LLMError as e:
             logger.warning(f"LLM compose_reply failed: {e}, using MockLLMClient")
-            return MockLLMClient().compose_reply(message, retrieved_row, match_kind, customer_context)
+            return MockLLMClient().compose_reply(message, retrieved_row, match_kind, customer_context, persona)
 
-    def compose_reply_with_history(self, messages: list[dict[str, str]], message: str, retrieved_row: dict | None, match_kind: str, customer_context: dict | None = None) -> str:
+    def compose_reply_with_history(self, messages: list[dict[str, str]], message: str, retrieved_row: dict | None, match_kind: str, customer_context: dict | None = None, persona: str | None = None) -> str:
         try:
-            return self._wrapped.compose_reply_with_history(messages, message, retrieved_row, match_kind, customer_context)
+            return self._wrapped.compose_reply_with_history(messages, message, retrieved_row, match_kind, customer_context, persona)
         except LLMError as e:
             logger.warning(f"LLM compose_reply_with_history failed: {e}, using MockLLMClient")
-            return MockLLMClient().compose_reply_with_history(messages, message, retrieved_row, match_kind, customer_context)
+            return MockLLMClient().compose_reply_with_history(messages, message, retrieved_row, match_kind, customer_context, persona)
 
 
 __all__ = [

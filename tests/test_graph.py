@@ -159,12 +159,12 @@ def test_compose_reply_uses_no_match_prompt_when_match_kind_none():
         def classify_with_history(self, messages):
             return {"intent": "faq", "confidence": 0.5, "has_complaint_signal": False, "sentiment": "neutral"}
 
-        def compose_reply(self, message, retrieved_row, match_kind, customer_context=None):
+        def compose_reply(self, message, retrieved_row, match_kind, customer_context=None, persona=None):
             self.captured_kind = match_kind
             self.captured_row = retrieved_row
             return "Mohon maaf, produk belum tersedia."
 
-        def compose_reply_with_history(self, messages, message, retrieved_row, match_kind, customer_context=None):
+        def compose_reply_with_history(self, messages, message, retrieved_row, match_kind, customer_context=None, persona=None):
             self.captured_kind = match_kind
             self.captured_row = retrieved_row
             return "Mohon maaf, produk belum tersedia."
@@ -185,9 +185,9 @@ def test_compose_reply_falls_back_to_verbatim_when_llm_raises():
 
         def classify_with_history(self, messages):
             return {"intent": "faq", "confidence": 0.5, "has_complaint_signal": False, "sentiment": "neutral"}
-        def compose_reply_with_history(self, messages, message, retrieved_row, match_kind, customer_context=None):
+        def compose_reply_with_history(self, messages, message, retrieved_row, match_kind, customer_context=None, persona=None):
             raise LLMError("down")
-        def compose_reply(self, message, retrieved_row, match_kind, customer_context=None):
+        def compose_reply(self, message, retrieved_row, match_kind, customer_context=None, persona=None):
             raise LLMError("API down")
 
     state = _base_high_state()
@@ -210,11 +210,11 @@ def test_compose_reply_retries_on_validation_failure_then_falls_back():
         def classify_with_history(self, messages):
             return {"intent": "faq", "confidence": 0.5, "has_complaint_signal": False, "sentiment": "neutral"}
 
-        def compose_reply(self, message, retrieved_row, match_kind, customer_context=None):
+        def compose_reply(self, message, retrieved_row, match_kind, customer_context=None, persona=None):
             self.calls += 1
             return f"Hoodie Rp 999.000 ready ya Kak (call {self.calls})"
 
-        def compose_reply_with_history(self, messages, message, retrieved_row, match_kind, customer_context=None):
+        def compose_reply_with_history(self, messages, message, retrieved_row, match_kind, customer_context=None, persona=None):
             self.calls += 1
             return f"Hoodie Rp 999.000 ready ya Kak (call {self.calls})"
 
@@ -240,7 +240,7 @@ def test_compose_reply_accepts_valid_reply_after_first_failure():
         def classify_with_history(self, messages):
             return {"intent": "faq", "confidence": 0.5, "has_complaint_signal": False, "sentiment": "neutral"}
 
-        def compose_reply(self, message, retrieved_row, match_kind, customer_context=None):
+        def compose_reply(self, message, retrieved_row, match_kind, customer_context=None, persona=None):
             self.calls += 1
             if self.calls == 1:
                 # Foreign price "999.000" — fails validation
@@ -248,7 +248,7 @@ def test_compose_reply_accepts_valid_reply_after_first_failure():
             # Valid: uses source numbers only
             return "Hoodie Rp 150.000 ready ya Kak"
 
-        def compose_reply_with_history(self, messages, message, retrieved_row, match_kind, customer_context=None):
+        def compose_reply_with_history(self, messages, message, retrieved_row, match_kind, customer_context=None, persona=None):
             self.calls += 1
             if self.calls == 1:
                 # Foreign price "999.000" — fails validation
@@ -276,12 +276,12 @@ def test_compose_reply_skips_llm_for_confirm_order():
 
         def classify_with_history(self, messages):
             return {"intent": "faq", "confidence": 0.5, "has_complaint_signal": False, "sentiment": "neutral"}
-        def compose_reply_with_history(self, messages, message, retrieved_row, match_kind, customer_context=None):
+        def compose_reply_with_history(self, messages, message, retrieved_row, match_kind, customer_context=None, persona=None):
             return "Mohon maaf, produk belum tersedia."
         def classify(self, message):
             return {"intent": "confirm_order", "confidence": 0.9}
 
-        def compose_reply(self, message, retrieved_row, match_kind, customer_context=None):
+        def compose_reply(self, message, retrieved_row, match_kind, customer_context=None, persona=None):
             self.called = True
             return "should not be used"
 
@@ -308,12 +308,12 @@ def test_compose_reply_skips_llm_for_browse_mode():
 
         def classify_with_history(self, messages):
             return {"intent": "faq", "confidence": 0.5, "has_complaint_signal": False, "sentiment": "neutral"}
-        def compose_reply_with_history(self, messages, message, retrieved_row, match_kind, customer_context=None):
+        def compose_reply_with_history(self, messages, message, retrieved_row, match_kind, customer_context=None, persona=None):
             return "Mohon maaf, produk belum tersedia."
         def classify(self, message):
             return {"intent": "check_product", "confidence": 0.9}
 
-        def compose_reply(self, message, retrieved_row, match_kind, customer_context=None):
+        def compose_reply(self, message, retrieved_row, match_kind, customer_context=None, persona=None):
             self.called = True
             return "should not be used"
 
@@ -339,17 +339,17 @@ def test_compose_reply_fallback_when_no_data_anywhere():
 
         def classify_with_history(self, messages):
             return {"intent": "faq", "confidence": 0.5, "has_complaint_signal": False, "sentiment": "neutral"}
-        def compose_reply_with_history(self, messages, message, retrieved_row, match_kind, customer_context=None):
+        def compose_reply_with_history(self, messages, message, retrieved_row, match_kind, customer_context=None, persona=None):
             return "Mohon maaf, produk belum tersedia."
         def classify(self, message):
             return {"intent": "faq", "confidence": 0.4}
 
-        def compose_reply(self, message, retrieved_row, match_kind, customer_context=None):
+        def compose_reply(self, message, retrieved_row, match_kind, customer_context=None, persona=None):
             self.called = True
             self.captured_row = retrieved_row
             return "Halo Kak! Kami cek dulu ya 🙏"
 
-        def compose_reply_with_history(self, messages, message, retrieved_row, match_kind, customer_context=None):
+        def compose_reply_with_history(self, messages, message, retrieved_row, match_kind, customer_context=None, persona=None):
             self.called = True
             self.captured_row = retrieved_row
             return "Halo Kak! Kami cek dulu ya 🙏"
@@ -375,9 +375,9 @@ def test_compose_reply_falls_back_when_llm_raises_on_no_match():
 
         def classify_with_history(self, messages):
             return {"intent": "faq", "confidence": 0.5, "has_complaint_signal": False, "sentiment": "neutral"}
-        def compose_reply_with_history(self, messages, message, retrieved_row, match_kind, customer_context=None):
+        def compose_reply_with_history(self, messages, message, retrieved_row, match_kind, customer_context=None, persona=None):
             raise LLMError("down")
-        def compose_reply(self, message, retrieved_row, match_kind, customer_context=None):
+        def compose_reply(self, message, retrieved_row, match_kind, customer_context=None, persona=None):
             raise LLMError("API down")
 
     state = _base_high_state()
@@ -441,7 +441,7 @@ def test_built_graph_runs_end_to_end_with_llm_client():
 
         def classify_with_history(self, messages):
             return {"intent": "faq", "confidence": 0.7, "has_complaint_signal": False, "sentiment": "neutral"}
-        def compose_reply_with_history(self, messages, message, retrieved_row, match_kind, customer_context=None):
+        def compose_reply_with_history(self, messages, message, retrieved_row, match_kind, customer_context=None, persona=None):
             return "Mohon maaf, produk belum tersedia."
         def __init__(self):
             self._mock = MockLLMClient()
@@ -450,11 +450,11 @@ def test_built_graph_runs_end_to_end_with_llm_client():
         def classify(self, message):
             return {"intent": "faq", "confidence": 0.9}
 
-        def compose_reply(self, message, retrieved_row, match_kind, customer_context=None):
+        def compose_reply(self, message, retrieved_row, match_kind, customer_context=None, persona=None):
             self.compose_calls += 1
             return self._mock.compose_reply(message, retrieved_row, match_kind)
 
-        def compose_reply_with_history(self, messages, message, retrieved_row, match_kind, customer_context=None):
+        def compose_reply_with_history(self, messages, message, retrieved_row, match_kind, customer_context=None, persona=None):
             self.compose_calls += 1
             return self._mock.compose_reply(message, retrieved_row, match_kind)
 

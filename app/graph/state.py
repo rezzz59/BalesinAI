@@ -39,3 +39,13 @@ class ChatState(TypedDict, total=False):
     fallback_reason: str | None
     # FAQ lookup output (fast path)
     faq_match: str | None  # Set when FAQ lookup matches before LLM classify
+
+    # Order capture output (intent=confirm_order path)
+    order_id: int | None  # DB primary key of the captured order
+    order_code: str | None  # Merchant-friendly reference code, e.g. "C-3F9D0A"
+    order_items: list[dict] | None  # [{product, qty, price}]
+    order_total: float | None
+
+    # Order draft state (multi-turn order refinement)
+    order_draft: list[dict] | None  # Draft items being built up: [{product, qty, price}]
+    last_mentioned_product: str | None  # Product name from last check_product intent

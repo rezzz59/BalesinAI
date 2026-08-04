@@ -25,7 +25,7 @@ class MockE2E(LLMClient):
             return {"intent": "confirm_order", "confidence": 0.9}
         return {"intent": "faq", "confidence": 0.8, "has_complaint_signal": False, "sentiment": "neutral"}
 
-    def compose_reply(self, message, retrieved_row, match_kind, customer_context=None):
+    def compose_reply(self, message, retrieved_row, match_kind, customer_context=None, persona=None):
         key = f"compose_{message[:30]}"
         if key in self.responses:
             return self.responses[key]
@@ -41,7 +41,7 @@ class MockE2E(LLMClient):
             return "Owner akan follow up via WhatsApp untuk konfirmasi pesanan Anda."
         return "Terima kasih pesannya sudah kami terima."
 
-    def compose_reply_with_history(self, messages, message, retrieved_row, match_kind, customer_context=None):
+    def compose_reply_with_history(self, messages, message, retrieved_row, match_kind, customer_context=None, persona=None):
         return self.compose_reply(message, retrieved_row, match_kind, customer_context)
 
 
@@ -119,11 +119,11 @@ def test_e2e_customer_context_is_propagated():
     captured_context = {"ctx": None}
 
     class CapturingLLM(MockE2E):
-        def compose_reply(self, message, retrieved_row, match_kind, customer_context=None):
+        def compose_reply(self, message, retrieved_row, match_kind, customer_context=None, persona=None):
             captured_context["ctx"] = customer_context
             return "Responding normally"
 
-        def compose_reply_with_history(self, messages, message, retrieved_row, match_kind, customer_context=None):
+        def compose_reply_with_history(self, messages, message, retrieved_row, match_kind, customer_context=None, persona=None):
             captured_context["ctx"] = customer_context
             return "Responding normally"
 
@@ -481,7 +481,7 @@ def test_multi_turn_complaint_then_followup():
     captured_contexts = []
 
     class TrackingLLM(MultiTurnMockE2E):
-        def compose_reply(self, message, retrieved_row, match_kind, customer_context=None):
+        def compose_reply(self, message, retrieved_row, match_kind, customer_context=None, persona=None):
             captured_contexts.append(customer_context)
             if "baru sampe" in message:
                 return "Mohon maaf, produk kami bisa diganti atau dikembalikan karena rusak."
