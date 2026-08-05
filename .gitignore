@@ -14,8 +14,9 @@ venv/
 *.sqlite
 *.sql
 
-# Runtime data (ignore entire folder)
-data/
+# Runtime data (ignore entire folder — but NOT app/data source code)
+/data/
+!app/data/
 
 # Google Sheets credentials
 secrets/*.json
@@ -38,6 +39,7 @@ OrderCloser_Lite_PRD_Final.md
 
 # Local tooling / scratch
 opencode.json
+.opencode/
 tmp/
 *.backup
 *.patch

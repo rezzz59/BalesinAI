@@ -23,11 +23,11 @@ def _tenant(business_type="jualan"):
 
 class TestBlueprintData:
     def test_covers_all_business_types(self):
-        for bt in ("jualan", "kuliner", "klinik", "fashion"):
+        for bt in ("jualan", "kuliner", "klinik", "fashion", "saas"):
             assert bt in BLUEPRINT_FAQS, f"missing {bt}"
 
     def test_available_types(self):
-        assert set(available_business_types()) == {"jualan", "kuliner", "klinik", "fashion"}
+        assert set(available_business_types()) == {"jualan", "kuliner", "klinik", "fashion", "saas"}
 
     def test_get_blueprint_returns_faqs_and_examples(self):
         bp = get_blueprint("kuliner")
