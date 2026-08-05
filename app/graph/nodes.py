@@ -575,6 +575,85 @@ async def send_whatsapp(state: ChatState, gateway_client: Any) -> dict:
         return {"action": "error"}
 
 
+def _notify_target(tenant: dict) -> str:
+    """Resolve where owner notifications go: a personal WA number OR a group ID.
+
+    Both are stored in owner_wa_number and passed through to the gateway as-is
+    (Fonnte accepts either). Empty never happens for real tenants.
+    """
+    return (tenant.get("owner_wa_number") or "").strip()
+
+
+def _digits_only(value: str) -> str:
+    return "".join(ch for ch in value if ch.isdigit())
+
+
+def _norm_wa(value: str) -> str:
+    """Normalize a WA number to the international (62...) digit form.
+
+    Handles '08...', '8...', '+628...', '628...' and strips any punctuation.
+    Group IDs (all digits, no leading 0/62) pass through unchanged.
+    """
+    digits = _digits_only(value)
+    if digits.startswith("0"):
+        return "62" + digits[1:]
+    return digits
+
+
+def _is_self_notify(tenant: dict, target: str) -> bool:
+    """True when the notification target IS the bot's own device number.
+
+    If the admin runs the bot on their personal number and also sets it as the
+    owner notification target, WhatsApp would notify itself. In that case we
+    skip the WhatsApp owner message (the admin already sees the thread) and
+    rely on the dashboard + chat log. Group IDs never collide with a device
+    number, so a plain normalized-equality check is sufficient.
+    """
+    device_id = (tenant.get("fonnte_device_id") or "").strip()
+    if not device_id or not target:
+        return False
+    return _norm_wa(device_id) == _norm_wa(target)
+
+
+def _compose_owner_fallback_message(state: ChatState, fallback_reason: str, sentiment: str) -> str:
+    """Build a plain-language WhatsApp notification for the owner.
+
+    No technical jargon — the owner should understand at a glance why the bot
+    couldn't handle the message and what to do next. Reason/category text is
+    hardcoded to the few known values so it never reads robotic.
+    """
+    reason_text = {
+        "unclear": "pesannya tidak masuk kategori pertanyaan biasa, jadi bot menyerahkannya ke Anda",
+        "low_confidence": "bot tidak yakin memahami maksudnya, jadi lebih aman diserahkan ke Anda",
+        "complaint_signal": "pelanggan tampak tidak senang/kecewa, sebaiknya segera Anda tangani",
+        "no_faq_match": "pertanyaannya belum ada di data jawaban yang tersedia",
+        "no_product_match": "produk yang ditanyakan tidak ditemukan di katalog",
+    }.get(fallback_reason, "bot belum bisa menjawabnya secara otomatis")
+
+    intent_text = {
+        "faq": "pertanyaan umum",
+        "check_product": "pertanyaan tentang produk",
+        "confirm_order": "pemesanan",
+        "unclear": "pesan yang tidak jelas",
+    }.get(state.get("intent", ""), "pesan")
+
+    sentiment_text = {
+        "negative": "pelanggan terkesan kurang puas",
+        "positive": "pelanggan tampak ramah/positif",
+        "neutral": "pelanggan bersikap netral",
+    }.get(sentiment, "sentimen tidak terdeteksi")
+
+    return (
+        f"Ada pesan yang perlu Anda balas manual ya Kak 🙏\n\n"
+        f"Pelanggan: {state['wa_number']}\n"
+        f'Pesan: "{state["message_text"]}"\n\n'
+        f"Alasan bot menyerahkannya: {reason_text}.\n\n"
+        f"Jenis pesan: {intent_text}.\n"
+        f"Catatan: {sentiment_text}.\n\n"
+        f"Silakan balas langsung ke pelanggan di WhatsApp."
+    )
+
+
 async def fallback_human(state: ChatState, gateway_client: Any) -> dict:
     """Forward original message to owner via WhatsApp gateway. Also sends buyer acknowledgement.
 
@@ -583,6 +662,11 @@ async def fallback_human(state: ChatState, gateway_client: Any) -> dict:
 
     If fallback_reason is not yet on state, derives it via fallback_reason_for().
     Returns {} on success, {action: "error"} on failure.
+
+    Owner notification target = owner_wa_number (personal number OR group ID).
+    Skipped when the target is the bot's own device (self-notify guard) — the
+    admin already sees the buyer thread on that device, so only the buyer
+    acknowledgement is sent and the thread is flagged for the dashboard.
     """
     from app.services.phone_gateway import PhoneGatewayException  # Local import to avoid circular deps
 
@@ -601,20 +685,18 @@ async def fallback_human(state: ChatState, gateway_client: Any) -> dict:
         )
         return {"action": "error"}
 
-    owner_msg = (
-        f"[FALLBACK] Pesan dari {state['wa_number']}:\n\n{state['message_text']}\n\n"
-        f"Intent: {state.get('intent', 'n/a')}\n"
-        f"Confidence: {state.get('confidence', 'n/a')}\n"
-        f"Sentiment: {sentiment}\n"
-        f"Reason: {fallback_reason}"
-    )
+    owner_msg = _compose_owner_fallback_message(state, fallback_reason, sentiment)
+
+    target = _notify_target(tenant)
+    self_notify = _is_self_notify(tenant, target)
 
     try:
-        # 1. Send to owner
-        await gateway_client.send_message(
-            phone=tenant["owner_wa_number"],
-            message=owner_msg,
-        )
+        # 1. Send to owner (skipped when the target is the bot's own device)
+        if not self_notify:
+            await gateway_client.send_message(
+                phone=target,
+                message=owner_msg,
+            )
         # 2. Send acknowledgement to buyer
         await gateway_client.send_message(
             phone=state["wa_number"],
@@ -627,6 +709,7 @@ async def fallback_human(state: ChatState, gateway_client: Any) -> dict:
                 "thread_id": state["thread_id"],
                 "reason": fallback_reason,
                 "sentiment": sentiment,
+                "self_notify": self_notify,
             },
         )
         return result
@@ -714,17 +797,18 @@ async def capture_order(
             logger.error("order_insert_failed", extra={"tenant_id": tenant_id, "error": str(e)})
 
     # Owner notification (best-effort, only when persisting real orders).
+    # Skipped when the target is the bot's own device (self-notify guard).
     if persist_orders:
         try:
             from app.db.tenant_repo import get_tenant
 
             tenant = get_tenant(tenant_id)
-            if tenant is not None:
+            if tenant is not None and not _is_self_notify(tenant, _notify_target(tenant)):
                 owner_msg = _format_owner_order_message(
                     state, items, total, buyer_name, buyer_address, order_code
                 )
                 await gateway_client.send_message(
-                    phone=tenant["owner_wa_number"],
+                    phone=_notify_target(tenant),
                     message=owner_msg,
                 )
         except Exception as e:  # noqa: BLE001
