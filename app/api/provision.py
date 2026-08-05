@@ -121,7 +121,7 @@ async def create_tenant(request: Request):
     """Create a tenant from a valid provisioning token + sheet URL.
 
     Body: {token, sheet_url, owner_wa_number, business_type, fonnte_api_key?,
-           merchant_name?}
+           merchant_name?, fonnte_device_id?}
     Encrypts the Fonnte API key, persists the tenant, seeds FAQ/catalog
     embeddings, and marks the token as used.
     """
@@ -132,6 +132,7 @@ async def create_tenant(request: Request):
     business_type = (body.get("business_type") or "jualan").strip().lower()
     merchant_name = (body.get("merchant_name") or "").strip()
     fonnte_api_key = (body.get("fonnte_api_key") or "").strip()
+    fonnte_device_id = (body.get("fonnte_device_id") or "").strip()
 
     if not token:
         raise HTTPException(status_code=400, detail="Token tidak ditemukan. Gunakan link dari admin Anda.")
@@ -191,6 +192,7 @@ async def create_tenant(request: Request):
             "catalog_count": len(catalog_rows),
             "merchant_name": merchant_name or tok.get("intended_merchant_name", ""),
         },
+        fonnte_device_id=fonnte_device_id,
     )
 
     # Seed embeddings (synchronous; 100-ish rows is fast on CPU).
@@ -348,6 +350,93 @@ async def provision_blueprints():
         "business_types": available_business_types(),
         "blueprints": {bt: get_blueprint(bt)["faqs"] for bt in available_business_types()},
     }
+
+
+@router.get("/inbox")
+async def provision_inbox(request: Request, tenant_id: str = "", filter: str = ""):
+    """Web inbox: list conversations, optionally filtered to 'needs_attention'.
+
+    filter=attention returns only threads an admin should look at (fallback,
+    complaint, or unanswered inbound message) — the "perlu dibalas" tab.
+    """
+    _check_admin_auth(request)
+    from app.db.chat_log_repo import list_threads
+    from app.db.tenant_repo import get_real_tenants
+
+    tenant = tenant_id.strip() or (get_real_tenants()[0]["tenant_id"] if get_real_tenants() else "")
+    if not tenant:
+        return {"tenant_id": "", "conversations": []}
+    threads = list_threads(tenant, limit=100)
+    if filter == "attention":
+        threads = [t for t in threads if t.get("needs_attention")]
+    return {"tenant_id": tenant, "conversations": threads}
+
+
+@router.get("/inbox/{thread_id}")
+async def provision_inbox_thread(thread_id: str, request: Request, tenant_id: str = ""):
+    """Web inbox: full message history for one thread."""
+    _check_admin_auth(request)
+    from app.db.chat_log_repo import list_chat_logs
+    from app.db.tenant_repo import get_real_tenants
+
+    tenant = tenant_id.strip() or (get_real_tenants()[0]["tenant_id"] if get_real_tenants() else "")
+    logs = list_chat_logs(tenant, thread_id=thread_id, limit=50)
+    return {"tenant_id": tenant, "thread_id": thread_id, "messages": logs}
+
+
+@router.post("/inbox/{thread_id}/reply")
+async def provision_inbox_reply(thread_id: str, request: Request):
+    """Web inbox: admin sends a reply to the buyer's WhatsApp number.
+
+    Body: {tenant_id, wa_number, message}. Sends via the tenant's Fonnte
+    gateway and records the reply in the chat log so it shows in the thread.
+    """
+    _check_admin_auth(request)
+    body = await request.json()
+    tenant_id = (body.get("tenant_id") or "").strip()
+    wa_number = (body.get("wa_number") or "").strip()
+    message = (body.get("message") or "").strip()
+
+    if not tenant_id:
+        raise HTTPException(status_code=400, detail="tenant_id wajib diisi.")
+    if not wa_number:
+        raise HTTPException(status_code=400, detail="Nomor WA buyer wajib diisi.")
+    if not message:
+        raise HTTPException(status_code=400, detail="Pesan tidak boleh kosong.")
+
+    tenant = get_tenant(tenant_id)
+    if tenant is None:
+        raise HTTPException(status_code=404, detail="Tenant tidak ditemukan.")
+
+    settings = get_settings()
+    from app.services.crypto import decrypt_api_key
+
+    enc_key = settings.encryption_key
+    wa_api_key = decrypt_api_key(tenant.get("wa_api_key_encrypted", ""), enc_key)
+
+    from app.services.fonnte import FonnteGateway
+    from app.services.phone_gateway import PhoneGatewayException
+
+    gateway = FonnteGateway(api_key=wa_api_key)
+    try:
+        await gateway.send_message(phone=wa_number, message=message)
+    except PhoneGatewayException as e:
+        logger.error("inbox_reply_send_failed", extra={"tenant_id": tenant_id, "error": str(e)})
+        raise HTTPException(status_code=502, detail=f"Gagal mengirim pesan: {e}")
+
+    from app.db.chat_log_repo import insert_chat_log
+
+    insert_chat_log(
+        thread_id=thread_id,
+        tenant_id=tenant_id,
+        wa_number=wa_number,
+        status="admin_reply",
+        intent=None,
+        response=message,
+        user_message=None,
+    )
+    logger.info("inbox_reply_sent", extra={"tenant_id": tenant_id, "thread_id": thread_id})
+    return {"status": "ok", "thread_id": thread_id, "message": message}
 
 
 @router.get("/tenants")

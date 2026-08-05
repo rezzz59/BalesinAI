@@ -76,8 +76,10 @@
                 <option value="klinik">Klinik / Kesehatan</option>
             </select>
             <div id="blueprintPreview" class="hidden mt-3 text-xs rounded-lg bg-blue-50 text-blue-900 p-3"></div>
-            <label class="block text-sm font-medium text-gray-700 mt-3">Nomor WhatsApp Pemilik (untuk follow-up order)</label>
-            <input id="ownerWa" class="input" placeholder="08xxxxxxxxxx">
+            <label class="block text-sm font-medium text-gray-700 mt-3">Nomor WhatsApp Pemilik (untuk follow-up order) — boleh nomor pribadi atau ID group admin</label>
+            <input id="ownerWa" class="input" placeholder="08xxxxxxxxxx atau ID group">
+            <label class="block text-sm font-medium text-gray-700 mt-3">Nomor Device Fonnte / Nomor Bot (opsional)</label>
+            <input id="fonnteDevice" class="input" placeholder="08xxxxxxxxxx — nomor yang dipakai bot">
             <label class="block text-sm font-medium text-gray-700 mt-3">API Key Fonnte (opsional — isi kalau sudah punya)</label>
             <input id="fonnteKey" type="password" class="input" placeholder="Tinggalkan kosong jika belum">
             <div id="createStatus" class="hidden mt-3 text-sm"></div>
@@ -233,6 +235,7 @@
             const businessType = document.getElementById('businessType').value;
             const ownerWa = document.getElementById('ownerWa').value.trim();
             const fonnteKey = document.getElementById('fonnteKey').value.trim();
+            const fonnteDevice = document.getElementById('fonnteDevice').value.trim();
             if (!ownerWa) { setStatus('createStatus', 'error', 'Nomor WhatsApp owner wajib diisi.'); return; }
             const btn = document.getElementById('createBtn');
             btn.disabled = true;
@@ -248,7 +251,8 @@
                         merchant_name: merchantName,
                         business_type: businessType,
                         owner_wa_number: ownerWa,
-                        fonnte_api_key: fonnteKey
+                        fonnte_api_key: fonnteKey,
+                        fonnte_device_id: fonnteDevice
                     })
                 });
                 const data = await res.json();

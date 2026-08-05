@@ -110,6 +110,101 @@ class TestBlueprints:
             assert data["blueprints"][bt], f"blueprint {bt} kosong"
 
 
+class TestInbox:
+    """Web inbox: list conversations (filter perlu dibalas), thread detail, reply."""
+
+    @staticmethod
+    def _make_tenant(tenant_id="tenant-inbox"):
+        from app.config import get_settings
+        from app.services.crypto import encrypt_api_key
+
+        enc = encrypt_api_key("fonnte-key", get_settings().encryption_key)
+        from app.db.tenant_repo import insert_or_update_tenant
+
+        insert_or_update_tenant(
+            tenant_id=tenant_id,
+            wa_api_key_encrypted=enc,
+            google_sheet_id="sheet-1",
+            owner_wa_number="+628111",
+            business_type="jualan",
+            onboarding_status="ready",
+        )
+        return tenant_id
+
+    @staticmethod
+    def _seed_chat_logs(tenant_id):
+        from app.db.chat_log_repo import insert_chat_log
+
+        insert_chat_log(thread_id="th-fallback", tenant_id=tenant_id, wa_number="+628900000001",
+                        status="fallback", intent="unclear", user_message="barang rusak",
+                        fallback_reason="complaint_signal")
+        insert_chat_log(thread_id="th-ok", tenant_id=tenant_id, wa_number="+628900000002",
+                        status="reply", intent="faq", user_message="jam buka?",
+                        response="Buka jam 8")
+
+    def test_inbox_lists_and_marks_attention(self, client, reset_db):
+        tid = self._make_tenant()
+        self._seed_chat_logs(tid)
+        r = client.get("/api/provision/inbox", headers={"Authorization": "Bearer " + WEBHOOK_AUTH_TOKEN})
+        assert r.status_code == 200, r.text
+        convos = r.json()["conversations"]
+        by_thread = {c["thread_id"]: c for c in convos}
+        assert by_thread["th-fallback"]["needs_attention"] is True
+        assert by_thread["th-ok"]["needs_attention"] is False
+
+    def test_inbox_filter_attention(self, client, reset_db):
+        tid = self._make_tenant()
+        self._seed_chat_logs(tid)
+        r = client.get("/api/provision/inbox?filter=attention",
+                       headers={"Authorization": "Bearer " + WEBHOOK_AUTH_TOKEN})
+        assert r.status_code == 200
+        ids = [c["thread_id"] for c in r.json()["conversations"]]
+        assert "th-fallback" in ids
+        assert "th-ok" not in ids
+
+    def test_inbox_requires_auth(self, client, reset_db):
+        r = client.get("/api/provision/inbox")
+        assert r.status_code in (401, 503)
+
+    def test_inbox_thread_detail(self, client, reset_db):
+        tid = self._make_tenant()
+        self._seed_chat_logs(tid)
+        r = client.get("/api/provision/inbox/th-fallback",
+                       headers={"Authorization": "Bearer " + WEBHOOK_AUTH_TOKEN})
+        assert r.status_code == 200
+        msgs = r.json()["messages"]
+        assert any(m.get("user_message") == "barang rusak" for m in msgs)
+
+    def test_inbox_reply_sends_and_logs(self, client, reset_db):
+        tid = self._make_tenant()
+        self._seed_chat_logs(tid)
+        with patch("app.services.fonnte.FonnteGateway.send_message") as mock_send:
+            mock_send.return_value = {"status": "ok"}
+            r = client.post(
+                "/api/provision/inbox/th-fallback/reply",
+                headers={"Authorization": "Bearer " + WEBHOOK_AUTH_TOKEN},
+                json={"tenant_id": tid, "wa_number": "+628900000001", "message": "Mohon maaf Kak, kami ganti barangnya."},
+            )
+        assert r.status_code == 200, r.text
+        mock_send.assert_called_once()
+        # Reply recorded in chat log
+        r2 = client.get("/api/provision/inbox/th-fallback",
+                        headers={"Authorization": "Bearer " + WEBHOOK_AUTH_TOKEN})
+        replies = [m for m in r2.json()["messages"] if m.get("status") == "admin_reply"]
+        assert len(replies) == 1
+        assert "ganti barangnya" in replies[0]["response"]
+
+    def test_inbox_reply_empty_message(self, client, reset_db):
+        tid = self._make_tenant()
+        self._seed_chat_logs(tid)
+        r = client.post(
+            "/api/provision/inbox/th-fallback/reply",
+            headers={"Authorization": "Bearer " + WEBHOOK_AUTH_TOKEN},
+            json={"tenant_id": tid, "wa_number": "+628900000001", "message": "  "},
+        )
+        assert r.status_code == 400
+
+
 class TestCreateTenant:
     def test_create_tenant_ok(self, client, reset_db):
         from app.db.tenant_repo import create_provisioning_token
