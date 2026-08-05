@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fitur — Balesin.ai</title>
+  <meta name="description" content="Fitur Balesin.ai: AI auto-reply grounded, mesin order otomatis, deteksi komplain, handoff ke owner, blueprint industri, dan dashboard inbox.">
+<link rel="icon" href="/static/assets/favicon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/assets/landing.css">
+<script>document.documentElement.classList.add("js");</script>
+</head>
+<body>
+
+<section class="page-hero">
+  <div class="container">
+    <span class="eyebrow reveal">Fitur</span>
+    <h1 class="display reveal">Bukan chatbot kaku.<br>Ini AI yang benar-benar jualan.</h1>
+    <p class="reveal">Enam fitur inti yang menjawab masalah nyata toko WhatsApp — dari chat yang nggak kejawab sampai order yang hilang.</p>
+  </div>
+</section>
+
+<!-- 1 -->
+<section class="section tight">
+  <div class="container">
+    <div class="frow reveal">
+      <div>
+        <span class="eyebrow">Fitur 01</span>
+        <h2 class="display">AI Auto-Reply 24/7 yang tidak pernah mengarang</h2>
+        <p>Setiap chat dianalisis untuk memahami maksudnya — tanya harga, cek produk, mau order, atau sekadar sapaan. Jawaban diambil dari data toko Anda: FAQ dan katalog di Google Sheets.</p>
+        <ul class="tick-list">
+          <li>Semantic search: paham "ada kaos biru ukuran M?" walau kata-katanya beda dari data</li>
+          <li>Validasi ketat: harga, stok, dan angka dijawab persis dari sumber — tidak diarang-ngarang</li>
+          <li>Multi-LLM failover: kalau satu provider gangguan, otomatis pindah ke cadangan</li>
+        </ul>
+      </div>
+      <div class="mini-panel">
+        <div class="sample-chat">
+          <div class="b user">"Kaos hitam ukuran L masih ada nggak?"</div>
+          <div class="b bot">"Ada Kak, ready! Harga Rp120.000. Bahan katun combed 30s. Mau langsung dipesan?"</div>
+          <div class="b user">"Berapa ongkir ke Bandung?"</div>
+          <div class="b bot">"Untuk ongkir ke Bandung biasanya 1–2 hari kerja. Saya cek detailnya dulu ya Kak, nanti owner konfirmasi biar tidak salah info 🙏"</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 2 -->
+    <div class="frow reveal">
+      <div class="mini-panel">
+        <div class="dash" style="padding:0;">
+          <div class="dash-chat">
+            <div class="dc-row">
+              <span class="dc-ava">P</span>
+              <div><b>Pelanggan</b><p>"Mau order 2 pcs kaos hitam L dan 1 pc putih M, kirim ke Rawamangun"</p></div>
+            </div>
+            <div class="dc-row me">
+              <span class="dc-ava">AI</span>
+              <div><b>Bot</b><p>"Ditunggu ya Kak. Order kamu: 2x Kaos Hitam L + 1x Kaos Putih M — total Rp360.000. Kode order OC-8421. Owner akan follow up untuk pembayaran ya 🙏"</p></div>
+            </div>
+            <div class="dc-row">
+              <span class="dc-ava">O</span>
+              <div><b>Owner</b><p>"Order OC-8421: Rp360.000 (pending)"</p></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div>
+        <span class="eyebrow">Fitur 02</span>
+        <h2 class="display">Mesin Order yang mencatat semuanya</h2>
+        <p>Produk, jumlah, dan total diekstrak langsung dari obrolan, lalu diberi kode order dan disimpan rapi. Tidak ada lagi order yang "numpang tulis di kertas" lalu hilang.</p>
+        <ul class="tick-list">
+          <li>Ekstraksi otomatis: produk, qty, dan total dari kalimat order pelanggan</li>
+          <li>Kode order unik per transaksi untuk pelacakan yang mudah</li>
+          <li>Semua order tampil di dashboard dengan status (pending → confirmed → paid)</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- 3 -->
+    <div class="frow reveal">
+      <div>
+        <span class="eyebrow">Fitur 03</span>
+        <h2 class="display">Komplain terdeteksi sebelum membesar</h2>
+        <p>AI membaca nada dan konteks chat. Kalau pelanggan kesal, kecewa, atau menyebut masalah — ini langsung ditandai sebagai komplain dan dinaikkan ke Anda, bukan dibalas template.</p>
+        <ul class="tick-list">
+          <li>Deteksi sinyal komplain + analisis sentimen pada setiap pesan</li>
+          <li>Eskalasi prioritas tinggi langsung ke WhatsApp owner</li>
+          <li>Pembeli mendapat ack otomatis "sedang kami cek" tanpa menunggu lama</li>
+        </ul>
+      </div>
+      <div class="mini-panel">
+        <div class="sample-chat">
+          <div class="b user">"Udah 5 hari kok belum sampai?! Barangnya mana?"</div>
+          <div class="b bot">"Maaf atas kendalanya Kak. Saya teruskan ke owner sekarang ya, mohon tunggu sebentar 🙏"</div>
+          <div class="b user">(owner menerima notifikasi: <b>[KOMPLAIN]</b> prioritas tinggi + riwayat chat + data order)</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 4 -->
+    <div class="frow reveal">
+      <div class="mini-panel">
+        <div class="dash" style="padding:0;">
+          <div class="dash-chat">
+            <div class="dc-row">
+              <span class="dc-ava">P</span>
+              <div><b>Pelanggan</b><p>"Garansi produknya berapa bulan ya?"</p></div>
+              <span class="dc-tag warn">fallback</span>
+            </div>
+            <div class="dc-row me">
+              <span class="dc-ava">AI</span>
+              <div><b>Bot</b><p>"Sedang kami cek, owner akan follow up ya 🙏"</p></div>
+            </div>
+            <div class="dc-row">
+              <span class="dc-ava">O</span>
+              <div><b>Owner</b><p>"Garansi 3 bulan Kak, ada syaratnya." <i style="font-size:.78rem;color:var(--ink-3);">— dibalas manual via inbox</i></p></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div>
+        <span class="eyebrow">Fitur 04</span>
+        <h2 class="display">Tahu kapan harus menyerahkan ke manusia</h2>
+        <p>Kunci yang membedakan dari chatbot biasa: AI tidak pernah memaksakan diri menjawab. Kalau ragu, tidak ada data, atau konteks penting — chat dinaikkan ke Anda dengan seluruh konteksnya.</p>
+        <ul class="tick-list">
+          <li>Handoff otomatis saat intent tidak yakin atau tidak ada kecocokan data</li>
+          <li>Owner menerima pesan + intent + confidence + alasan, bukan sekadar chat mentah</li>
+          <li>Balasan owner tercatat di thread yang sama, jadi riwayat tetap utuh</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- 5 -->
+    <div class="frow reveal">
+      <div>
+        <span class="eyebrow">Fitur 05</span>
+        <h2 class="display">Blueprint per industri, siap pakai</h2>
+        <p>Tidak semua orang mau mulai dari nol. Pilih jenis usaha Anda dan FAQ serta cara jawab yang sesuai langsung terisi — tinggal disesuaikan dengan toko Anda.</p>
+        <ul class="tick-list">
+          <li>Jualan, kuliner, klinik, dan fashion — masing-masing dengan starter FAQ</li>
+          <li>Contoh katalog pengisi agar bot tidak mulai dari kosong</li>
+          <li>Semua bisa diedit penuh dari Google Sheets Anda sendiri</li>
+        </ul>
+      </div>
+      <div class="mini-panel">
+        <div class="sample-chat">
+          <div class="b bot">"Halo Kak, selamat datang di toko kami 👋 Ada yang bisa dibantu?"</div>
+          <div class="b user">"Jam buka sampai jam berapa?"</div>
+          <div class="b bot">"Kami buka setiap hari. Jam operasional lengkap bisa dicek di info profil ya Kak."</div>
+          <div class="b user">"Bisa delivery nggak?"</div>
+          <div class="b bot">"Bisa Kak, kami layani delivery dengan ongkir sesuai jarak."</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 6 -->
+    <div class="frow reveal">
+      <div class="mini-panel">
+        <div class="dash">
+          <div class="dash-kpis">
+            <div class="dash-kpi"><span>Omzet hari ini</span><b>Rp845rb</b></div>
+            <div class="dash-kpi"><span>Order</span><b>12</b></div>
+            <div class="dash-kpi"><span>Perlu dibalas</span><b>3</b></div>
+          </div>
+          <div class="dash-chat">
+            <div class="dc-row">
+              <span class="dc-ava">A</span>
+              <div><b>Ani</b><p>"Sudah 5 hari barang belum sampai 😢"</p></div>
+              <span class="dc-tag warn">komplain</span>
+            </div>
+            <div class="dc-row">
+              <span class="dc-ava">B</span>
+              <div><b>Budi</b><p>"Mau order 1 pcs kaos hitam M"</p></div>
+              <span class="dc-tag ok">order OC-8422</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div>
+        <span class="eyebrow">Fitur 06</span>
+        <h2 class="display">Dashboard &amp; inbox dalam satu tempat</h2>
+        <p>Semua percakapan dan order tersusun rapi. Tab "perlu dibalas" memastikan chat yang butuh manusia tidak pernah tenggelam di antara ribuan notifikasi.</p>
+        <ul class="tick-list">
+          <li>Ringkasan omzet, order hari ini, dan performa bot</li>
+          <li>Inbox berlabel: perlu dibalas vs sudah dijawab AI</li>
+          <li>Balas langsung dari web — terkirim ke WhatsApp pembeli</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section tight">
+  <div class="container">
+    <div class="cta-band reveal">
+      <h2 class="display">Semua fitur ini bisa dicoba gratis</h2>
+      <p>Tanpa kartu kredit, tanpa instalasi. Hubungkan data toko Anda dan lihat AI-nya bekerja.</p>
+      <div class="cta-row">
+        <a class="btn light btn-lg" href="/daftar">Coba Gratis</a>
+        <a class="btn dark btn-lg" href="/demo">Coba di Demo</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<script src="/static/assets/landing.js"></script>
+</body>
+</html>

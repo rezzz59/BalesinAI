@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pesan — OrderCloser</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:#F0EEE8; --panel:#FFFFFF; --border:#E4E1D9;
+    --ink:#26261F; --ink2:#57554E; --ink3:#93918A;
+    --brand:#2F7FE0; --brand-soft:#E4EEFB; --brand-dark:#2569C2;
+    --green:#25D366; --green-dark:#1DA851;
+    --amber:#B7791F; --amber-soft:#FBF0DC;
+    --red:#C53030; --red-soft:#FBE9E9;
+    --chat-out:#D9FDD3; --chat-in:#FFFFFF;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:'Plus Jakarta Sans',system-ui,sans-serif; background:var(--bg); color:var(--ink); font-size:14px; }
+  .app { display:flex; height:100vh; overflow:hidden; }
+
+  /* ---------- Sidebar ---------- */
+  .side { width:380px; min-width:380px; background:var(--panel); border-right:1px solid var(--border); display:flex; flex-direction:column; }
+  .side-head { padding:14px 16px 0; }
+  .side-top { display:flex; align-items:center; gap:10px; margin-bottom:12px; }
+  .side-top .logo { width:34px; height:34px; border-radius:10px; background:var(--brand); color:#fff; display:flex; align-items:center; justify-content:center; font-weight:800; }
+  .side-top b { font-size:16px; }
+  .side-top .right { margin-left:auto; display:flex; gap:6px; }
+  .icon-btn { border:none; background:transparent; color:var(--ink2); cursor:pointer; padding:6px; border-radius:8px; }
+  .icon-btn:hover { background:#F1EFE8; }
+  .search { position:relative; margin-bottom:10px; }
+  .search input { width:100%; padding:9px 12px 9px 34px; border:1px solid var(--border); border-radius:9px; font-size:13px; font-family:inherit; background:#F7F5F0; }
+  .search svg { position:absolute; left:10px; top:50%; transform:translateY(-50%); color:var(--ink3); }
+
+  /* tabs (swipeable) */
+  .tabs { display:flex; border-bottom:1px solid var(--border); position:relative; }
+  .tab { flex:1; text-align:center; padding:11px 6px; font-weight:600; font-size:12.5px; color:var(--ink3); cursor:pointer; border:none; border-bottom:2px solid transparent; background:none; font-family:inherit; }
+  .tab.active { color:var(--brand); border-bottom-color:var(--brand); }
+  .tab .cnt { display:inline-block; margin-left:5px; background:var(--brand-soft); color:var(--brand); border-radius:999px; padding:0 7px; font-size:11px; }
+
+  /* conversation list */
+  .convos { flex:1; overflow-y:auto; }
+  .conv { display:flex; gap:12px; padding:12px 16px; border-bottom:1px solid #F0EEE8; cursor:pointer; align-items:center; }
+  .conv:hover { background:#F7F5F0; }
+  .conv.active { background:var(--brand-soft); }
+  .conv .ava { width:44px; height:44px; border-radius:50%; flex-shrink:0; background:#DCE8F8; display:flex; align-items:center; justify-content:center; overflow:hidden; }
+  .ava svg { display:block; }
+  .conv .body { flex:1; min-width:0; }
+  .conv .row1 { display:flex; justify-content:space-between; align-items:baseline; }
+  .conv .name { font-weight:600; font-size:13.5px; }
+  .conv .time { font-size:11px; color:var(--ink3); }
+  .conv .msg { font-size:12.5px; color:var(--ink2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:240px; }
+  .conv .badge { font-size:10px; font-weight:700; padding:2px 8px; border-radius:999px; }
+  .b-fallback { background:var(--red-soft); color:var(--red); }
+  .b-unanswered { background:var(--amber-soft); color:var(--amber); }
+  .b-complaint { background:var(--red-soft); color:var(--red); }
+
+  /* ---------- Chat panel ---------- */
+  .chat { flex:1; display:flex; flex-direction:column; background:url("data:image/svg+xml;utf8,<svg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'><rect width='60' height='60' fill='%23EFEDE6'/><circle cx='5' cy='5' r='2' fill='%23E4E1D8'/><circle cx='55' cy='15' r='3' fill='%23E4E1D8'/><circle cx='15' cy='55' r='2' fill='%23E4E1D8'/><circle cx='45' cy='40' r='2' fill='%23E4E1D8'/></svg>"); }
+  .chat-head { background:var(--panel); border-bottom:1px solid var(--border); padding:12px 18px; display:flex; align-items:center; gap:12px; }
+  .chat-head .ava { width:40px; height:40px; border-radius:50%; background:#DCE8F8; display:flex; align-items:center; justify-content:center; overflow:hidden; }
+  .chat-head .c-name { font-weight:600; }
+  .chat-head .c-sub { font-size:11.5px; color:var(--ink3); }
+  .chat-head .right { margin-left:auto; display:flex; gap:4px; }
+
+  .msgs { flex:1; overflow-y:auto; padding:18px; display:flex; flex-direction:column; gap:4px; }
+  .msg { max-width:65%; padding:8px 12px; border-radius:10px; font-size:13.5px; line-height:1.45; box-shadow:0 1px 1px rgba(0,0,0,.06); position:relative; }
+  .msg.in { background:var(--chat-in); align-self:flex-start; border-top-left-radius:2px; }
+  .msg.out { background:var(--chat-out); align-self:flex-end; border-top-right-radius:2px; }
+  .msg .meta { display:block; text-align:right; font-size:10.5px; color:var(--ink3); margin-top:3px; }
+  .msg .tag { display:inline-block; font-size:9.5px; font-weight:700; padding:1px 6px; border-radius:999px; margin-bottom:4px; margin-right:6px; }
+  .t-fallback { background:var(--red-soft); color:var(--red); }
+  .t-order { background:var(--brand-soft); color:var(--brand-dark); }
+  .t-admin { background:#E7EFE8; color:#2F6B3A; }
+  .day-divider { align-self:center; background:var(--panel); color:var(--ink3); font-size:11px; padding:3px 10px; border-radius:999px; box-shadow:0 1px 2px rgba(0,0,0,.06); margin:8px 0; }
+
+  .composer { background:var(--panel); padding:12px 16px; display:flex; gap:10px; align-items:flex-end; }
+  .composer textarea { flex:1; resize:none; border:1px solid var(--border); border-radius:10px; padding:11px 14px; font-family:inherit; font-size:13.5px; max-height:120px; }
+  .composer textarea:focus { outline:none; border-color:var(--brand); }
+  .send-btn { width:42px; height:42px; border-radius:50%; background:var(--green); border:none; color:#fff; cursor:pointer; display:flex; align-items:center; justify-content:center; }
+  .send-btn:hover { background:var(--green-dark); }
+  .send-btn:disabled { background:#A8D5B9; cursor:not-allowed; }
+
+  /* empty */
+  .empty { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; color:var(--ink3); text-align:center; gap:8px; padding:20px; }
+  .empty b { color:var(--ink2); }
+
+  .auth-prompt { position:fixed; inset:0; background:var(--panel); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px; z-index:10; }
+  .auth-prompt input { width:300px; padding:11px 14px; border:1px solid var(--border); border-radius:10px; font-family:inherit; }
+  .auth-prompt .btn { background:var(--brand); color:#fff; border:none; padding:11px 22px; border-radius:10px; font-weight:700; font-family:inherit; cursor:pointer; }
+
+  @media (max-width:768px) {
+    .side { width:100%; min-width:0; }
+    .chat { display:none; }
+    .chat.open { display:flex; position:fixed; inset:0; z-index:5; }
+    .back-btn { display:block !important; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- Sidebar -->
+  <aside class="side" id="side">
+    <div class="side-head">
+      <div class="side-top">
+        <div class="logo">OC</div>
+        <b>Pesan</b>
+        <div class="right">
+          <a class="icon-btn" href="/dashboard" title="Dashboard">
+            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>
+          </a>
+          <button class="icon-btn" onclick="refreshAll()" title="Muat ulang">
+            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
+          </button>
+        </div>
+      </div>
+      <div class="search">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+        <input id="search" placeholder="Cari percakapan..." oninput="renderConvos()">
+      </div>
+      <div class="tabs">
+        <button class="tab active" data-tab="all" onclick="setTab('all')">Semua<span class="cnt" id="cntAll"></span></button>
+        <button class="tab" data-tab="attention" onclick="setTab('attention')">Perlu Dibalas<span class="cnt" id="cntAttention"></span></button>
+      </div>
+    </div>
+    <div class="convos" id="convos"></div>
+  </aside>
+
+  <!-- Chat -->
+  <main class="chat" id="chat">
+    <div class="empty">
+      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#C4C2BA" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+      <b>Pilih percakapan</b>
+      <span>Klik percakapan di samping untuk melihat dan membalas.</span>
+    </div>
+  </main>
+</div>
+
+<div class="auth-prompt" id="authPrompt">
+  <div style="font-size:18px;font-weight:700">OrderCloser — Pesan</div>
+  <div style="color:var(--ink3);font-size:13px">Masukkan token admin (WEBHOOK_AUTH_TOKEN)</div>
+  <input id="adminToken" type="password" placeholder="Token admin">
+  <button class="btn" onclick="saveToken()">Masuk</button>
+  <div id="authErr" style="color:var(--red);font-size:12.5px"></div>
+</div>
+
+<script>
+/* ============ data + state ============ */
+let AUTH = sessionStorage.getItem('admin_token') || '';
+let CONVOS = [];
+let TENANT = new URLSearchParams(window.location.search).get('tenant_id') || '';
+let TAB = 'all';
+let ACTIVE_THREAD = null;
+let POLL = null;
+
+const NAMES = {};
+
+function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML;}
+
+/* Deterministic avatar: silhouette (pria/wanita) + soft pastel, based on wa number. */
+const AVATAR_COLORS=['#DCE8F8','#F8E3DC','#E4F4EE','#FBF0DC','#EEE6F8','#E0F0F5'];
+const AVATAR_MAN='<svg viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="20" cy="14" r="8" fill="rgba(0,0,0,.22)"/><path d="M20 23c-8.2 0-14 4.8-14 11.5V40h28v-5.5C34 27.8 28.2 23 20 23z" fill="rgba(0,0,0,.22)"/></svg>';
+const AVATAR_WOMAN='<svg viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="20" cy="14" r="8" fill="rgba(0,0,0,.22)"/><path d="M20 23c-8.2 0-14 4.8-14 11.5V40h28v-5.5C34 27.8 28.2 23 20 23z" fill="rgba(0,0,0,.22)"/><path d="M13 12a7 7 0 0 1 14 0c0 2.5-1.4 4.5-3.4 5.4l2 5.6h-3.4l-1-3h-2.4l-1 3h-3.4l2-5.6C14.4 16.5 13 14.5 13 12z" fill="rgba(0,0,0,.30)"/></svg>';
+function avatarColor(wa){let s=0;for(const c of String(wa||''))s+=c.charCodeAt(0);return AVATAR_COLORS[s%AVATAR_COLORS.length];}
+function avatarSvg(wa){let s=0;for(const c of String(wa||''))s+=c.charCodeAt(0);return (s%2===0?AVATAR_MAN:AVATAR_WOMAN);}
+function avatarHtml(wa,size){
+  const svg=avatarSvg(wa);
+  const inner=svg.replace('<svg ','<svg width="'+size+'" height="'+size+'" ');
+  return '<div class="ava" style="background:'+avatarColor(wa)+';width:'+size+'px;height:'+size+'px">'+inner+'</div>';
+}
+function fmtTime(iso){ if(!iso) return ''; const d=new Date(iso); if(isNaN(d)) return ''; return d.toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit'}); }
+function fmtDay(iso){ const d=new Date(iso); if(isNaN(d)) return ''; const t=d.toLocaleDateString('id-ID',{weekday:'long'}); const today=new Date(); return d.toDateString()===today.toDateString()?'Hari ini':t; }
+
+async function api(path, method, body){
+  const res=await fetch(path,{method,headers:{'Content-Type':'application/json','Authorization':'Bearer '+AUTH},body:body?JSON.stringify(body):undefined});
+  const data=await res.json();
+  if(!res.ok) throw new Error(data.detail||('HTTP '+res.status));
+  return data;
+}
+
+function saveToken(){
+  AUTH=document.getElementById('adminToken').value.trim();
+  sessionStorage.setItem('admin_token',AUTH);
+  init();
+}
+
+/* ============ render ============ */
+function setTab(t){
+  TAB=t;
+  document.querySelectorAll('.tab').forEach(b=>b.classList.toggle('active',b.dataset.tab===t));
+  renderConvos();
+}
+
+function renderConvos(){
+  const q=(document.getElementById('search').value||'').toLowerCase();
+  const el=document.getElementById('convos');
+  let list=CONVOS.filter(c=>TAB!=='attention'||c.needs_attention);
+  if(q) list=list.filter(c=>(c.wa_number||'').toLowerCase().includes(q)||((c.last_message||'')+'').toLowerCase().includes(q));
+  document.getElementById('cntAll').textContent=CONVOS.length||'';
+  document.getElementById('cntAttention').textContent=(CONVOS.filter(c=>c.needs_attention).length)||'';
+  el.innerHTML=list.map(c=>{
+    const av=avatarHtml(c.wa_number,44);
+    const badge = c.needs_attention
+      ? (c.fallback_reason==='complaint_signal'||c.intent==='unclear'
+          ? '<span class="badge b-complaint">Komplain</span>'
+          : '<span class="badge b-unanswered">Perlu dibalas</span>')
+      : '';
+    const last = c.last_message || c.last_response || 'Percakapan baru';
+    return '<div class="conv'+(c.thread_id===ACTIVE_THREAD?' active':'')+'" onclick="openThread(\''+esc(c.thread_id)+'\')">'+
+      av+
+      '<div class="body"><div class="row1"><span class="name">'+esc(c.wa_number||c.thread_id)+'</span><span class="time">'+fmtTime(c.timestamp)+'</span></div>'+
+      '<div class="msg">'+esc(last.slice(0,60))+'</div></div>'+
+      '<div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end">'+badge+'</div></div>';
+  }).join('') || '<div class="empty"><b>'+(TAB==='attention'?'Semua sudah dibalas 🎉':'Belum ada percakapan')+'</b><span>'+(TAB==='attention'?'Tidak ada pesan yang perlu perhatian.':'Pesan dari pelanggan akan muncul di sini.')+'</span></div>';
+}
+
+function statusTag(m){
+  if(m.status==='admin_reply') return '<span class="tag t-admin">Admin</span>';
+  if(m.status==='fallback'||m.fallback_reason) return '<span class="tag t-fallback">Fallback</span>';
+  if(m.status==='order'||m.intent==='confirm_order') return '<span class="tag t-order">Order</span>';
+  return '';
+}
+
+async function openThread(threadId){
+  ACTIVE_THREAD=threadId;
+  renderConvos();
+  const chat=document.getElementById('chat');
+  chat.classList.add('open');
+  chat.innerHTML='<div class="chat-head"><button class="icon-btn back-btn" style="display:none" onclick="document.getElementById(\'chat\').classList.remove(\'open\')">←</button>'+avatarHtml(threadId,40)+
+    '<div><div class="c-name" id="headName">'+esc(threadId)+'</div><div class="c-sub" id="headSub">Memuat...</div></div>'+
+    '<div class="right"><button class="icon-btn" onclick="refreshThread()" title="Muat ulang">🔄</button></div></div>'+
+    '<div class="msgs" id="msgs"><div class="empty">Memuat pesan...</div></div>'+
+    '<div class="composer"><textarea id="replyBox" rows="1" placeholder="Ketik pesan..." onkeydown="if(event.key===\'Enter\'&&!event.shiftKey){event.preventDefault();sendReply();}"></textarea>'+
+    '<button class="send-btn" id="sendBtn" onclick="sendReply()"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 2-7 20-4-9-9-4z"/><path d="M22 2 11 13"/></svg></button></div>';
+  await refreshThread();
+  startPoll(threadId);
+}
+
+async function refreshThread(){
+  if(!ACTIVE_THREAD) return;
+  try{
+    const d=await api('/api/provision/inbox/'+encodeURIComponent(ACTIVE_THREAD)+(TENANT?('?tenant_id='+encodeURIComponent(TENANT)):''));
+    const msgs=document.getElementById('msgs');
+    if(!msgs) return;
+    const headName=document.getElementById('headName');
+    if(headName && d.messages.length){
+      const last=d.messages[d.messages.length-1];
+      headName.textContent=last.wa_number||ACTIVE_THREAD;
+    }
+    document.getElementById('headSub').textContent=d.messages.length+' pesan';
+    let lastDay='';
+    msgs.innerHTML=d.messages.map(m=>{
+      const isIn=!!m.user_message;
+      const day=fmtDay(m.timestamp);
+      const div=day!==lastDay?('<div class="day-divider">'+day+'</div>'):'';
+      lastDay=day;
+      const meta=fmtTime(m.timestamp)+' ✓';
+      return div+'<div class="msg '+(isIn?'in':'out')+'">'+statusTag(m)+'<span>'+(isIn?esc(m.user_message):esc(m.response||''))+'</span><span class="meta">'+meta+'</span></div>';
+    }).join('') || '<div class="empty"><b>Belum ada pesan</b><span>Riwayat percakapan akan tampil di sini.</span></div>';
+    msgs.scrollTop=msgs.scrollHeight;
+    // refresh conversation list in background (badges)
+    await loadConvos(true);
+  }catch(e){}
+}
+
+async function sendReply(){
+  const box=document.getElementById('replyBox');
+  const btn=document.getElementById('sendBtn');
+  const msg=(box.value||'').trim();
+  if(!msg||!ACTIVE_THREAD) return;
+  btn.disabled=true;
+  try{
+    const thread=CONVOS.find(c=>c.thread_id===ACTIVE_THREAD);
+    await api('/api/provision/inbox/'+encodeURIComponent(ACTIVE_THREAD)+'/reply', 'POST', {
+      tenant_id: TENANT||(thread&&thread.tenant_id)||'',
+      wa_number: thread?thread.wa_number:'',
+      message: msg
+    });
+    box.value='';
+    await refreshThread();
+  }catch(e){
+    alert('Gagal kirim: '+e.message);
+  }finally{
+    btn.disabled=false;
+  }
+}
+
+async function loadConvos(silent){
+  try{
+    const d=await api('/api/provision/inbox'+(TENANT?('?tenant_id='+encodeURIComponent(TENANT)):''), 'GET');
+    CONVOS=d.conversations||[];
+    renderConvos();
+  }catch(e){
+    if(!silent){
+      document.getElementById('convos').innerHTML='<div class="empty"><b>Gagal memuat</b><span>'+esc(e.message)+'</span></div>';
+    }
+  }
+}
+
+function refreshAll(){
+  loadConvos().then(()=>ACTIVE_THREAD&&refreshThread());
+}
+
+function startPoll(tid){
+  if(POLL) clearInterval(POLL);
+  POLL=setInterval(()=>{ if(ACTIVE_THREAD===tid) refreshThread(); }, 8000);
+}
+
+/* ============ init ============ */
+async function init(){
+  const prompt=document.getElementById('authPrompt');
+  if(!AUTH){ prompt.style.display='flex'; return; }
+  prompt.style.display='none';
+  await loadConvos();
+  refreshAll();
+}
+init();
+</script>
+</body>
+</html>
