@@ -78,8 +78,14 @@ def _get_tenant_clients(tenant_id: str, config: TenantConfig, settings: "Setting
         return _cached_clients[tenant_id]
 
     try:
-        # 1. Get/create LLM client
-        llm_client = get_safe_llm_client(["gemini", "adacode"])
+        # 1. Get/create LLM client. Priority follows settings.llm_backend first,
+        #    then any other configured backend as fallback (never wait out a
+        #    quota-exhausted primary when an alternative is available).
+        priority = [settings.llm_backend] if settings.llm_backend else []
+        for extra in ("adacode", "gemini", "anthropic"):
+            if extra not in priority and getattr(settings, f"{extra}_api_key", ""):
+                priority.append(extra)
+        llm_client = get_safe_llm_client(priority or ["gemini", "adacode"])
     except (ImportError, ModuleNotFoundError, LLMError) as e:
         logger.warning(f"LLM init failed for tenant {tenant_id}: {e}. Using mock.")
         llm_client = MockLLMClient()
@@ -180,6 +186,14 @@ async def whatsapp_webhook(request: Request):
     # 5. Look up tenant configuration from DB
     settings = get_settings()
     tenant_record = get_tenant(tenant_id)
+    if not tenant_record:
+        # Fallback: map the Fonnte device number to the tenant that owns it
+        # (tenant IDs are merchant-friendly, not device numbers).
+        from app.db.tenant_repo import get_tenant_by_device
+
+        tenant_record = get_tenant_by_device(data.get("device", ""))
+        if tenant_record is not None:
+            tenant_id = tenant_record["tenant_id"]
     if not tenant_record:
         logger.warning("tenant_not_found", extra={"tenant_id": tenant_id})
         raise HTTPException(
@@ -405,6 +419,37 @@ async def dashboard_page():
     dashboard_html_path = os.path.join(os.path.dirname(__file__), '..', 'static', 'dashboard.html')
     with open(dashboard_html_path, 'r', encoding='utf-8') as f:
         return f.read()
+
+
+@app.get('/pesan', response_class=HTMLResponse)
+async def pesan_page():
+    """Web inbox UI — WhatsApp-like messaging with filter 'perlu dibalas'."""
+    pesan_html_path = os.path.join(os.path.dirname(__file__), '..', 'static', 'pesan.html')
+    with open(pesan_html_path, 'r', encoding='utf-8') as f:
+        return f.read()
+
+
+# --- Brand landing pages (Obrol.ai) ---
+_LANDING_PAGES = {
+    "/": "landing.html",
+    "/fitur": "fitur.html",
+    "/cara-kerja": "cara-kerja.html",
+    "/industri": "industri.html",
+    "/harga": "harga.html",
+    "/demo": "demo.html",
+    "/masuk": "masuk.html",
+    "/daftar": "daftar.html",
+}
+
+
+def _read_static_page(filename: str) -> str:
+    path = os.path.join(os.path.dirname(__file__), '..', 'static', filename)
+    with open(path, 'r', encoding='utf-8') as f:
+        return f.read()
+
+
+for _route, _file in _LANDING_PAGES.items():
+    app.get(_route, response_class=HTMLResponse)(lambda _f=_file: _read_static_page(_f))
 
 
 @app.post('/api/chat/test')

@@ -117,6 +117,45 @@ def get_tenant(tenant_id: str) -> TenantRecord | None:
         )
 
 
+def _norm_digits(value: str) -> str:
+    """Normalize a WA/device number to the international digit form.
+
+    '083135333166' and '6283135333166' both become '6283135333166'.
+    """
+    digits = "".join(ch for ch in value if ch.isdigit())
+    if digits.startswith("0"):
+        return "62" + digits[1:]
+    return digits
+
+
+def get_tenant_by_device(device_id: str) -> TenantRecord | None:
+    """Fetch the tenant whose fonnte_device_id matches a device number.
+
+    Normalizes both sides (08... vs 62...) before comparing, so the webhook can
+    map a Fonnte `device` field ('6283135333166') to a tenant stored with
+    '083135333166'. Returns None if no tenant owns that device.
+    """
+    target = _norm_digits(device_id)
+    if not target:
+        return None
+    with get_session() as session:
+        tenants = session.query(TenantConfig).all()
+        for tenant in tenants:
+            if _norm_digits(tenant.fonnte_device_id or "") == target:
+                return TenantRecord(
+                    tenant_id=tenant.tenant_id,
+                    wa_api_key_encrypted=tenant.wa_api_key_encrypted,
+                    google_sheet_id=tenant.google_sheet_id,
+                    payment_provider=tenant.payment_provider,
+                    owner_wa_number=tenant.owner_wa_number,
+                    business_type=tenant.business_type,
+                    onboarding_status=tenant.onboarding_status,
+                    onboarding_data=tenant.onboarding_data,
+                    fonnte_device_id=tenant.fonnte_device_id,
+                )
+        return None
+
+
 def update_onboarding_status(tenant_id: str, status: str) -> None:
     """Update only the onboarding status for a tenant."""
     with get_session() as session:
