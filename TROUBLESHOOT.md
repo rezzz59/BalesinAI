@@ -2,7 +2,7 @@
 
 ## Status Saat Ini
 
-✅ **Fonnte Token Baru**: `Bvv7nJZGPsYAmWZ4BPej` (sudah di `.env` dan DB)
+✅ **Fonnte Token Baru**: `<redacted — lihat .env>` (sudah di `.env` dan DB)
 ✅ **Tenant DB**: `default` dan `default_tenant` sudah di-update dengan nomor owner yang benar
 ⚠️ **Server**: Terus mati karena sandbox restrictions
 
@@ -31,7 +31,7 @@ Setelah dapat URL ngrok, setting di https://dashboard.fonnte.com:
 | Setting | Value |
 |---------|-------|
 | **Webhook URL** | `https://YOUR-Ngrok-URL.ngrok-free.dev/webhook/whatsapp/` |
-| **Authorization** | `Bearer S4bfYPjfqWCZMm7j2dUAfAbiJB-Kb2b74Bat1T8UyYM` |
+| **Authorization** | `Bearer <redacted — lihat WEBHOOK_AUTH_TOKEN di .env>` |
 | **Custom Header** | `X-Tenant-ID: default_tenant` |
 
 ## Test Manual dengan Python
@@ -71,7 +71,7 @@ Pastikan di Fonnte webhook header ada:
 - `X-Tenant-ID: default_tenant`
 
 ### 3. 401 Unauthorized
-Pastikan token Bearer sesuai: `S4bfYPjfqWCZMm7j2dUAfAbiJB-Kb2b74Bat1T8UyYM`
+Pastikan token Bearer sesuai `<redacted — lihat WEBHOOK_AUTH_TOKEN di .env>`
 
 ## Payload Fonnte yang Diterima
 
