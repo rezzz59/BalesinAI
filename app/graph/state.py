@@ -28,6 +28,7 @@ class ChatState(TypedDict, total=False):
     product_match: dict | None
     match_kind: str | None  # "high" | "medium" | "none" — set by lookup_catalog
     blueprint_fallback: bool | None  # True when answered from industry blueprint
+    photo_url: str | None  # Public URL of an uploaded product photo (Pro tier)
 
     # Compose output
     reply_text: str

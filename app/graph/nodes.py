@@ -1,5 +1,6 @@
 """LangGraph nodes for OrderCloser Lite."""
 import logging
+import re
 from typing import Any
 
 from app.graph.state import ChatState
@@ -172,6 +173,36 @@ def classify_intent(state: ChatState, llm_client: Any) -> dict:
         raise
 
 
+def _find_photo_url(tenant_id: str, product_name: str) -> str | None:
+    """Look for an uploaded product photo whose filename matches the product name.
+
+    Photos live in data/media/<tenant>/<slug>__<token>.<ext>. We match by slugging
+    the product name and scanning filenames, returning a public URL (BASE_URL +
+    path) that Fonnte can fetch to deliver an actual image to the buyer.
+    Returns None if no photo is found (text-only reply).
+    """
+    import glob
+    import os
+
+    from app.config import get_settings
+
+    if not product_name:
+        return None
+    slug = re.sub(r"[^a-z0-9]+", "-", str(product_name).strip().lower()).strip("-")
+    if not slug:
+        return None
+
+    base = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    folder = os.path.join(base, "data", "media", tenant_id)
+    pattern = os.path.join(folder, f"{slug}__*")
+    matches = glob.glob(os.path.join(folder, f"{slug}.*")) + glob.glob(pattern)
+    if not matches:
+        return None
+    filename = os.path.basename(matches[0])
+    settings = get_settings()
+    return f"{settings.base_url}/media/{tenant_id}/{filename}"
+
+
 def lookup_catalog(
     state: ChatState,
     sheets_client: Any,
@@ -276,6 +307,7 @@ def lookup_catalog(
                     "product_match": best_product,
                     "match_kind": _to_match_kind(best_score),
                     "last_mentioned_product": best_product.get("nama_produk"),
+                    "photo_url": _find_photo_url(state["tenant_id"], best_product.get("nama_produk", "")),
                 }
             # No specific product keyword matched — treat as a catalog-browse
             # request. List all ready products as a deterministic template reply
@@ -543,17 +575,51 @@ def _extract_family(nama: str) -> str:
 async def send_whatsapp(state: ChatState, gateway_client: Any) -> dict:
     """Send reply_text to buyer via WhatsApp gateway. Returns {} on success.
 
-    Uses duck typing: client must have send_message(phone, message) method.
+    If a product photo_url was matched and the tenant is on the Pro/Enterprise
+    tier, the photo is delivered first as an actual image (Fonnte `url`
+    attachment) followed by the text reply. Basic tier stays text-only.
+
+    Uses duck typing: client must have send_message(phone, message) and
+    send_attachment(phone, url, caption) methods.
     Raises PhoneGatewayException if there's an error after retries.
 
     Returns {action: "error"} on failure.
     """
     from app.services.phone_gateway import PhoneGatewayException  # Local import to avoid circular deps
 
+    photo_url = state.get("photo_url")
+    if photo_url:
+        try:
+            from app.db.tenant_repo import get_tenant
+
+            tenant = get_tenant(state["tenant_id"])
+            tier = (tenant or {}).get("tier", "basic")
+            if tier in ("pro", "enterprise"):
+                await gateway_client.send_attachment(
+                    phone=state["wa_number"],
+                    image_url=photo_url,
+                    caption=state["reply_text"],
+                )
+                logger.info(
+                    "whatsapp_sent_with_photo",
+                    extra={"tenant_id": state["tenant_id"], "thread_id": state["thread_id"]},
+                )
+                return {}
+
+        except Exception as e:  # noqa: BLE001
+            logger.warning("whatsapp_photo_failed", extra={"tenant_id": state["tenant_id"], "error": str(e)})
+            # fall through to text-only if the attachment path fails
+
     try:
+        intro = ""
+        history = state.get("messages") or []
+        if not history:
+            # First turn in this thread — introduce the virtual assistant once
+            # (no privacy disclaimer, just a natural opener).
+            intro = "Halo kak 👋 Saya asisten virtual dari toko ini. Langsung tanya saja produk, harga, atau stok ya ✨\n\n"
         await gateway_client.send_message(
             phone=state["wa_number"],
-            message=state["reply_text"],
+            message=intro + state["reply_text"],
         )
         logger.info(
             "whatsapp_sent",

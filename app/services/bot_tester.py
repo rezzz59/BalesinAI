@@ -71,6 +71,10 @@ class DryRunGateway:
         self.calls.append((phone, message))
         return {"status": "ok", "dry_run": True}
 
+    async def send_attachment(self, phone: str, image_url: str, caption: str = "") -> dict[str, Any]:
+        self.calls.append((phone, f"[FOTO {image_url}] {caption}"))
+        return {"status": "ok", "dry_run": True}
+
 
 def _tenant_record(tenant_id: str) -> dict[str, Any]:
     from app.db.tenant_repo import get_tenant
@@ -297,13 +301,23 @@ def _compute_readiness(breakdown: list[dict], threshold: float) -> dict:
 def _build_llm_client() -> Any:
     from app.services.llm import get_safe_llm_client
 
-    return get_safe_llm_client(["gemini", "adacode"])
+    settings = get_settings()
+    priority = [settings.llm_backend] if settings.llm_backend else []
+    for extra in ("adacode", "gemini", "anthropic"):
+        if extra not in priority and getattr(settings, f"{extra}_api_key", ""):
+            priority.append(extra)
+    return get_safe_llm_client(priority or ["gemini", "adacode"])
 
 
 def _build_sheets_client(tenant_id: str) -> Any:
+    tenant = _tenant_record(tenant_id)
+    if tenant.get("data_source") == "upload":
+        from app.services.local_data import LocalDataClient
+
+        return LocalDataClient(tenant_id=tenant_id)
+
     from app.services.sheets import GoogleSheetsClient
 
-    tenant = _tenant_record(tenant_id)
     settings = get_settings()
     return GoogleSheetsClient(
         credentials_json_path=settings.google_sheets_credentials_json_path,
