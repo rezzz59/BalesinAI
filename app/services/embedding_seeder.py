@@ -78,3 +78,54 @@ def seed_tenant_embeddings(
         extra={"tenant_id": tenant_id, "faq": faq_count, "catalog": catalog_count},
     )
     return {"faq": faq_count, "catalog": catalog_count}
+
+
+def seed_local_tenant_embeddings(
+    tenant_id: str,
+    repo=None,
+    embedding_service=None,
+) -> dict:
+    """Seed embeddings from locally-uploaded FAQ/catalog rows (no Sheets).
+
+    Mirrors seed_tenant_embeddings but reads from the local DB tables, so a
+    tenant with data_source='upload' gets the same semantic search without
+    touching Google Sheets.
+    """
+    from app.db import local_data_repo
+
+    repo = repo or get_embedding_repo()
+    embedding_service = embedding_service or get_embedding_service()
+
+    faq_rows = local_data_repo.session_faq(tenant_id)
+    catalog_rows = local_data_repo.session_catalog(tenant_id)
+
+    faq_count = 0
+    for idx, row in enumerate(faq_rows):
+        text = _faq_text(row)
+        if not text:
+            continue
+        try:
+            vec = embedding_service.encode(text)
+            repo.save(tenant_id, "faq", str(idx), text, vec)
+            faq_count += 1
+        except Exception as e:  # noqa: BLE001
+            logger.warning("embed_faq_failed", extra={"tenant_id": tenant_id, "idx": idx, "error": str(e)})
+
+    catalog_count = 0
+    for row in catalog_rows:
+        text = _catalog_text(row)
+        row_id = (row.get("nama_produk") or "").strip()
+        if not text or not row_id:
+            continue
+        try:
+            vec = embedding_service.encode(text)
+            repo.save(tenant_id, "catalog", row_id, text, vec)
+            catalog_count += 1
+        except Exception as e:  # noqa: BLE001
+            logger.warning("embed_catalog_failed", extra={"tenant_id": tenant_id, "product": row_id, "error": str(e)})
+
+    logger.info(
+        "embeddings_seeded_local",
+        extra={"tenant_id": tenant_id, "faq": faq_count, "catalog": catalog_count},
+    )
+    return {"faq": faq_count, "catalog": catalog_count}
