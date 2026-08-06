@@ -16,6 +16,8 @@ asumsikan bocor.
 | Key | Provider | Cara Rotate |
 |-----|----------|-------------|
 | `FONNTE_API_KEY` | https://fonnte.com | Generate ulang di dashboard → update `.env` |
+| `FONNTE_ACCOUNT_TOKEN` | https://fonnte.com | **ACCOUNT token** (create-device + QR). Wajib di-rotate jika ini terlihat publik |
+| `BASE_URL` | lokal kamu | `http://localhost:8000` dev → domain + HTTPS saat publish (Fonnte butuh URL publik utk kirim foto) |
 | `GEMINI_API_KEY` | Google Cloud Console | Rotate/create baru → update `.env` |
 | `ADACODE_API_KEY` | https://adacode.ai | Regenerate → update `.env` |
 | `ENCRYPTION_KEY` | lokal | `python scripts/gen_encryption_key.py` → update `.env` |
@@ -107,10 +109,16 @@ asumsikan bocor.
 
 ## Catatan Arsitektur (rekap singkat)
 
-- **Sumber fakta (harga/stok)** = hanya dari Google Sheets (deterministik).
+- **Sumber fakta (harga/stok)** = hanya dari Google Sheets (deterministik) **atau** XLSX upload (`data_source`).
   LLM hanya parse intent + rangkai kalimat; `validate_reply` memblokir angka/ukuran inventif
 - **Webhook**: payload Fonnte `device` → dipetakan ke tenant via `get_tenant_by_device`
-  (10.x tak bisa langsung, tenant id = nama merchant)
+  (device id ≠ tenant id, tenant id = nama merchant)
 - **Notifikasi admin**: `owner_wa_number` boleh nomor pribadi ATAU group ID;
   guard `_is_self_notify` cegah notifikasi ke nomor device sendiri
+- **Tier paket**: basic/pro/enterprise → `gateway_plan` lite/super/waba.
+  Basic = text only; Pro = text + kirim foto katalog (asli, via `url`); Enterprise = WABA upgrade
+- **QR device**: platform pakai `FONNTE_ACCOUNT_TOKEN` utk create-device + QR (user scan, tanpa buat akun Fonnte)
+- **Foto produk**: simpan `data/media/<tenant>/<slug>.jpg`, nama file = nama_produk →
+  `_find_photo_url` match → kirim via `/media/...` (foto asli). `BASE_URL` harus publik di prod
+- **Intro asisten virtual**: 1x per thread di `send_whatsapp` (tanpa disclaimer data)
 - **Tenant aktif saat ini**: `balesin-ai-7d4b` (saas, 80 embeddings, ready)
