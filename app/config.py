@@ -28,6 +28,8 @@ class Settings(BaseSettings):
     # Required (must be provided via environment)
     encryption_key: str = ""
     fonnte_api_key: str = ""  # API key for Fonnte WhatsApp Gateway
+    fonnte_account_token: str = ""  # Fonnte ACCOUNT token (for add-device/QR)
+    base_url: str = "http://localhost:8000"  # public base URL for media attachments
     google_sheets_credentials_json_path: str = "./secrets/sheets-sa.json"
     google_sheets_spreadsheet_id: str = ""  # filled from tenant context or env
     webhook_auth_token: str = ""  # Secret for webhook endpoint authentication (Bearer token)

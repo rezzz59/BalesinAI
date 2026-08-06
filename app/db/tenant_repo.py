@@ -18,6 +18,10 @@ class TenantRecord(TypedDict):
     onboarding_status: str
     onboarding_data: str
     fonnte_device_id: str
+    data_source: str
+    tier: str
+    device_status: str
+    gateway_plan: str
 
 
 PROVISION_TOKEN_TTL_HOURS = 48
@@ -65,8 +69,13 @@ def insert_or_update_tenant(
     onboarding_status: str = "ready",
     onboarding_data: dict | None = None,
     fonnte_device_id: str = "",
+    data_source: str = "sheet",
+    tier: str | None = None,
+    device_status: str | None = None,
+    gateway_plan: str | None = None,
 ) -> None:
-    """Insert or update tenant config."""
+    """Insert or update tenant config. None for tier/device_status/gateway_plan
+    leaves the stored value untouched (on update) or uses the default."""
     with get_session() as session:
         from app.db.models import TenantConfig
         tenant = session.get(TenantConfig, tenant_id)
@@ -79,6 +88,13 @@ def insert_or_update_tenant(
             tenant.onboarding_status = onboarding_status
             tenant.onboarding_data = json.dumps(onboarding_data or {})
             tenant.fonnte_device_id = fonnte_device_id
+            tenant.data_source = data_source
+            if tier is not None:
+                tenant.tier = tier
+            if device_status is not None:
+                tenant.device_status = device_status
+            if gateway_plan is not None:
+                tenant.gateway_plan = gateway_plan
             tenant.updated_at = _now()
         else:
             tenant = TenantConfig(
@@ -91,6 +107,10 @@ def insert_or_update_tenant(
                 onboarding_status=onboarding_status,
                 onboarding_data=json.dumps(onboarding_data or {}),
                 fonnte_device_id=fonnte_device_id,
+                data_source=data_source,
+                tier=tier or "basic",
+                device_status=device_status or "fresh",
+                gateway_plan=gateway_plan or "lite",
             )
             session.add(tenant)
         session.commit()
@@ -114,6 +134,10 @@ def get_tenant(tenant_id: str) -> TenantRecord | None:
             onboarding_status=tenant.onboarding_status,
             onboarding_data=tenant.onboarding_data,
             fonnte_device_id=tenant.fonnte_device_id,
+            data_source=tenant.data_source,
+            tier=tenant.tier,
+            device_status=tenant.device_status,
+            gateway_plan=tenant.gateway_plan,
         )
 
 
@@ -152,6 +176,10 @@ def get_tenant_by_device(device_id: str) -> TenantRecord | None:
                     onboarding_status=tenant.onboarding_status,
                     onboarding_data=tenant.onboarding_data,
                     fonnte_device_id=tenant.fonnte_device_id,
+                    data_source=tenant.data_source,
+                    tier=tenant.tier,
+                    device_status=tenant.device_status,
+                    gateway_plan=tenant.gateway_plan,
                 )
         return None
 
@@ -176,6 +204,28 @@ def update_onboarding_data(tenant_id: str, onboarding_data: dict) -> None:
             session.commit()
 
 
+def update_device_status(tenant_id: str, status: str) -> None:
+    """Update only the device_status for a tenant (fresh/pending/connected/disconnected)."""
+    with get_session() as session:
+        tenant = session.get(TenantConfig, tenant_id)
+        if tenant:
+            tenant.device_status = status
+            tenant.updated_at = _now()
+            session.commit()
+
+
+def update_tier(tenant_id: str, tier: str, gateway_plan: str | None = None) -> None:
+    """Update the tier (basic/pro/enterprise) and optionally gateway plan."""
+    with get_session() as session:
+        tenant = session.get(TenantConfig, tenant_id)
+        if tenant:
+            tenant.tier = tier
+            if gateway_plan:
+                tenant.gateway_plan = gateway_plan
+            tenant.updated_at = _now()
+            session.commit()
+
+
 def list_tenants() -> list[dict]:
     """List all tenants (without encrypted keys for API safety)."""
     with get_session() as session:
@@ -189,6 +239,10 @@ def list_tenants() -> list[dict]:
                 "business_type": t.business_type,
                 "onboarding_status": t.onboarding_status,
                 "fonnte_device_id": t.fonnte_device_id,
+                "data_source": t.data_source,
+                "tier": t.tier,
+                "device_status": t.device_status,
+                "gateway_plan": t.gateway_plan,
                 "readiness": (json.loads(t.onboarding_data or "{}") or {}).get("readiness"),
             }
             for t in tenants
