@@ -583,7 +583,15 @@ function toggleSidebar() { document.getElementById("sidebar").classList.toggle("
 /* ---------- Load data: real via API, fallback to demo ---------- */
 async function init() {
   let d = DEMO;
-  const tenant = new URLSearchParams(window.location.search).get("tenant_id") || "";
+  let tenant = new URLSearchParams(window.location.search).get("tenant_id") || "";
+  try {
+    // Require a logged-in session for the merchant view.
+    const me = await fetch("/api/auth/me");
+    if (!me.ok) { window.location = "/masuk"; return; }
+    const meData = await me.json();
+    if (!tenant && meData.tenant) tenant = meData.tenant.tenant_id;
+  } catch (e) { window.location = "/masuk"; return; }
+
   try {
     const res = await fetch("/api/dashboard" + (tenant ? ("?tenant_id=" + encodeURIComponent(tenant)) : ""));
     if (res.ok) {

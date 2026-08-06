@@ -11,6 +11,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
+from app.api.auth import router as auth_router
+from app.api.onboard import router as onboard_router
 from app.api.provision import router as provision_router
 from app.config import get_settings
 from app.db import init_db  # Ensure DB tables are created
@@ -31,6 +33,7 @@ from app.services.llm import (
     get_llm_client,
     MockLLMClient,
 )
+from app.services.local_data import LocalDataClient
 from app.services.sheets import GoogleSheetsClient
 from app.services.phone_gateway import PhoneGatewayException
 from app.services.fonnte import FonnteGateway, FonnteError
@@ -64,6 +67,8 @@ app.add_middleware(
 )
 
 app.include_router(provision_router)
+app.include_router(auth_router)
+app.include_router(onboard_router)
 
 
 # --- Global cached clients per tenant ---
@@ -90,11 +95,14 @@ def _get_tenant_clients(tenant_id: str, config: TenantConfig, settings: "Setting
         logger.warning(f"LLM init failed for tenant {tenant_id}: {e}. Using mock.")
         llm_client = MockLLMClient()
 
-    # 2. Create Sheets client with tenant's Google Sheet ID
-    sheets_client = GoogleSheetsClient(
-        credentials_json_path=settings.google_sheets_credentials_json_path,
-        spreadsheet_id=config.get("google_sheet_id", ""),
-    )
+    # 2. Create data client: LocalDataClient for uploaded XLSX data, else Google Sheets
+    if config.get("data_source") == "upload":
+        sheets_client = LocalDataClient(tenant_id=tenant_id)
+    else:
+        sheets_client = GoogleSheetsClient(
+            credentials_json_path=settings.google_sheets_credentials_json_path,
+            spreadsheet_id=config.get("google_sheet_id", ""),
+        )
 
     # 3. Create Fonnte gateway with tenant's decrypted API key
     enc_key = settings.encryption_key
@@ -421,6 +429,14 @@ async def dashboard_page():
         return f.read()
 
 
+@app.get('/onboard', response_class=HTMLResponse)
+async def onboard_page():
+    """Self-service onboarding wizard for a logged-in merchant."""
+    path = os.path.join(os.path.dirname(__file__), '..', 'static', 'onboard.html')
+    with open(path, 'r', encoding='utf-8') as f:
+        return f.read()
+
+
 @app.get('/pesan', response_class=HTMLResponse)
 async def pesan_page():
     """Web inbox UI — WhatsApp-like messaging with filter 'perlu dibalas'."""
@@ -505,6 +521,7 @@ async def chat_test_endpoint(request: Request):
 __all__ = ["app"]
 
 app.mount('/static', StaticFiles(directory=os.path.join(os.path.dirname(__file__), '..', 'static')), name='static')
+app.mount('/media', StaticFiles(directory=os.path.join(os.path.dirname(__file__), '..', 'data', 'media')), name='media')
 
 
 @app.get('/api/tenants')

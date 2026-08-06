@@ -19,31 +19,54 @@
     <span class="eyebrow">Coba gratis</span>
     <h1 class="display">Mulai obrol pertama</h1>
     <p class="sub">Free trial 14 hari, semua fitur Pro. Tanpa kartu kredit.</p>
-    <form>
-      <div class="field">
-        <label for="store">Nama toko</label>
-        <input id="store" type="text" placeholder="mis. Warung Kopi Nusantara" autocomplete="organization">
-      </div>
+    <form onsubmit="register(event)">
       <div class="field">
         <label for="name">Nama Anda</label>
         <input id="name" type="text" placeholder="Nama pemilik" autocomplete="name">
       </div>
       <div class="field">
-        <label for="wa">Nomor WhatsApp toko</label>
-        <input id="wa" type="tel" placeholder="62812xxxxxxx" autocomplete="tel">
-        <div class="hint">Dipakai untuk menerima notifikasi order &amp; komplain.</div>
+        <label for="email2">Email</label>
+        <input id="email2" type="email" placeholder="nama@tokokamu.com" autocomplete="email" required>
       </div>
       <div class="field">
-        <label for="email2">Email</label>
-        <input id="email2" type="email" placeholder="nama@tokokamu.com" autocomplete="email">
+        <label for="password">Kata sandi</label>
+        <input id="password" type="password" placeholder="Minimal 6 karakter" autocomplete="new-password" required>
       </div>
-      <button class="btn primary" type="submit">Buat Akun Gratis</button>
-      <div class="auth-note">Pendaftaran sedang disiapkan. Sementara itu, hubungi kami via WhatsApp dan kami pasangkan untuk Anda.</div>
+      <button class="btn primary" type="submit" id="regBtn">Buat Akun Gratis</button>
+      <div class="auth-note" id="authNote"></div>
     </form>
     <p class="auth-alt">Sudah punya akun? <a href="/masuk">Masuk</a></p>
   </div>
 </section>
 
+<script>
+  async function register(e) {
+    e.preventDefault();
+    const btn = document.getElementById('regBtn');
+    const note = document.getElementById('authNote');
+    note.style.display = 'block';
+    note.className = 'auth-note text-amber-700';
+    note.textContent = 'Membuat akun...';
+    btn.disabled = true;
+    try {
+      const res = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: document.getElementById('email2').value.trim(),
+          password: document.getElementById('password').value,
+          full_name: document.getElementById('name').value.trim()
+        })
+      });
+      const d = await res.json();
+      if (!res.ok) { note.className = 'auth-note text-red-600'; note.textContent = d.detail || 'Gagal mendaftar.'; return; }
+      window.location = '/onboard';
+    } catch (err) {
+      note.className = 'auth-note text-red-600';
+      note.textContent = 'Error: ' + err.message;
+    } finally { btn.disabled = false; }
+  }
+</script>
 <script src="/static/assets/landing.js"></script>
 </body>
 </html>

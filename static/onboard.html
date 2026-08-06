@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Setup Bot — Balesin.ai</title>
+    <link rel="icon" href="/static/assets/favicon.svg">
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <div class="max-w-2xl mx-auto px-4 py-8">
+        <div class="text-center mb-8">
+            <div class="text-sm font-bold text-sky-600 tracking-wide mb-1">Balesin.ai</div>
+            <h1 class="text-2xl font-bold text-gray-900">Aktifkan Bot WhatsApp Anda</h1>
+            <p class="text-sm text-gray-500 mt-1">5 langkah, sekitar 10 menit. Tanpa coding.</p>
+        </div>
+
+        <!-- Stepper -->
+        <ol id="stepper" class="flex items-center justify-between mb-8 text-xs">
+            <li data-step="1" class="flex-1 text-center"><span class="step-dot">1</span><div>Toko</div></li>
+            <li data-step="2" class="flex-1 text-center"><span class="step-dot">2</span><div>Data</div></li>
+            <li data-step="3" class="flex-1 text-center"><span class="step-dot">3</span><div>WhatsApp</div></li>
+            <li data-step="4" class="flex-1 text-center"><span class="step-dot">4</span><div>Test</div></li>
+            <li data-step="5" class="flex-1 text-center"><span class="step-dot">5</span><div>Live!</div></li>
+        </ol>
+
+        <!-- Step 1: Toko -->
+        <section data-panel="1" class="bg-white rounded-xl shadow-sm p-6">
+            <h2 class="text-lg font-semibold mb-2">Step 1 — Data Toko</h2>
+            <label class="block text-sm font-medium text-gray-700 mt-3">Nama Toko / Brand</label>
+            <input id="merchantName" class="input" placeholder="Contoh: Kopi Nusantara">
+            <label class="block text-sm font-medium text-gray-700 mt-3">Jenis Usaha</label>
+            <select id="businessType" class="input">
+                <option value="jualan">Toko Online / Umum</option>
+                <option value="kuliner">Kuliner / Makanan</option>
+                <option value="fashion">Fashion / Pakaian</option>
+                <option value="klinik">Klinik / Kesehatan</option>
+            </select>
+            <label class="block text-sm font-medium text-gray-700 mt-3">Nomor WhatsApp Pemilik — untuk notifikasi order &amp; komplain (boleh nomor pribadi atau ID group admin)</label>
+            <input id="ownerWa" class="input" placeholder="08xxxxxxxxxx atau ID group">
+            <div id="status1" class="hidden mt-3 text-sm"></div>
+            <button onclick="createTenant()" id="btn1" class="btn-primary mt-5">Lanjut →</button>
+        </section>
+
+        <!-- Step 2: Upload Data -->
+        <section data-panel="2" class="hidden bg-white rounded-xl shadow-sm p-6">
+            <h2 class="text-lg font-semibold mb-2">Step 2 — Upload Data Produk &amp; FAQ</h2>
+            <p class="text-sm text-gray-600 mb-3">
+                Unggah file <b>.xlsx</b> berisi 2 sheet: <b>FAQ</b> (kolom pertanyaan, jawaban)
+                dan <b>Katalog</b> (kolom nama_produk, harga, ready, deskripsi).
+                Belum punya? <a href="#" onclick="downloadTemplate(); return false;" class="text-indigo-600 underline">Download template</a>.
+            </p>
+            <div class="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center" id="dropZone">
+                <div class="text-3xl mb-2">📁</div>
+                <div class="text-sm text-gray-500">Klik untuk pilih file, atau seret ke sini</div>
+                <input type="file" id="fileInput" accept=".xlsx" class="hidden">
+            </div>
+            <div id="uploadStatus" class="hidden mt-3 text-sm"></div>
+
+            <label class="block text-sm font-medium text-gray-700 mt-4">Foto Produk (opsional — paket Pro)</label>
+            <p class="text-xs text-gray-500 mb-2">Nama file foto = nama produk di katalog. Contoh: <b>Kaos Hitam L.jpg</b> → bot kirim foto asli saat ditanya.</p>
+            <div class="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center" id="dropZonePhoto">
+                <div class="text-2xl mb-1">🖼️</div>
+                <div class="text-sm text-gray-500">Pilih foto produk</div>
+                <input type="file" id="photoInput" accept="image/*" class="hidden">
+            </div>
+            <div id="photoStatus" class="hidden mt-2 text-sm"></div>
+
+            <div class="flex gap-3 mt-5">
+                <button onclick="go(1)" class="btn-ghost">← Kembali</button>
+                <button onclick="go(3)" id="btn2" class="btn-primary" disabled>Lanjut →</button>
+            </div>
+        </section>
+
+        <!-- Step 3: Paket + WhatsApp QR -->
+        <section data-panel="3" class="hidden bg-white rounded-xl shadow-sm p-6">
+            <h2 class="text-lg font-semibold mb-2">Step 3 — Pilih Paket &amp; Hubungkan WhatsApp</h2>
+            <label class="block text-sm font-medium text-gray-700">Pilih Paket</label>
+            <select id="tier" class="input">
+                <option value="basic">Basic — Rp 149rb/bln (teks saja)</option>
+                <option value="pro" selected>Pro — Rp 299rb/bln (teks + kirim foto katalog)</option>
+                <option value="enterprise">Enterprise — Rp 699rb/bln (WABA, prioritas)</option>
+            </select>
+
+            <label class="block text-sm font-medium text-gray-700 mt-3">Nomor WhatsApp yang dipakai bot</label>
+            <div class="flex gap-2">
+                <input id="deviceWa" class="input" placeholder="08xxxxxxxxxx">
+                <button onclick="provisionDevice()" class="btn-primary whitespace-nowrap">Tampilkan QR</button>
+            </div>
+            <div id="qrBox" class="hidden mt-4 text-center bg-gray-50 rounded-lg p-4">
+                <div class="text-sm text-gray-600 mb-2">Scan QR ini dengan WhatsApp di HP Anda (WhatsApp &gt; Perangkat Tertaut &gt; Tautkan)</div>
+                <img id="qrImg" class="mx-auto" style="max-width:240px;">
+                <div id="qrStatus" class="text-sm mt-2"></div>
+            </div>
+            <div id="status3" class="hidden mt-3 text-sm"></div>
+            <div class="flex gap-3 mt-5">
+                <button onclick="go(2)" class="btn-ghost">← Kembali</button>
+                <button onclick="saveTierAndContinue()" class="btn-primary">Lanjut ke Test →</button>
+            </div>
+        </section>
+
+        <!-- Step 4: Test -->
+        <section data-panel="4" class="hidden bg-white rounded-xl shadow-sm p-6">
+            <h2 class="text-lg font-semibold mb-1">Step 4 — Coba Bot Anda</h2>
+            <p class="text-sm text-gray-600 mb-3">Kirim pesan seperti pelanggan. Balasan tampil di sini — <b>tanpa dikirim ke WhatsApp</b>.</p>
+            <div id="chatBox" class="h-64 overflow-y-auto bg-gray-50 rounded-lg p-3 mb-3 space-y-2"></div>
+            <div class="flex gap-2">
+                <input id="testMsg" class="input" placeholder="Contoh: jam buka jam berapa?" onkeydown="if(event.key==='Enter')sendTest()">
+                <button onclick="sendTest()" class="btn-primary whitespace-nowrap">Kirim</button>
+            </div>
+            <div class="flex gap-3 mt-5">
+                <button onclick="go(3)" class="btn-ghost">← Kembali</button>
+                <button onclick="go(5)" class="btn-primary">Aktifkan Sekarang →</button>
+            </div>
+        </section>
+
+        <!-- Step 5: Live -->
+        <section data-panel="5" class="hidden bg-white rounded-xl shadow-sm p-6 text-center py-12">
+            <div class="w-16 h-16 rounded-full bg-green-100 text-green-600 flex items-center justify-center text-3xl mx-auto mb-4">✓</div>
+            <h2 class="text-lg font-semibold mb-2">Selamat! Bot Anda sudah aktif 🎉</h2>
+            <p class="text-sm text-gray-600 mb-4">Setelah webhook Fonnte diarahkan, bot siap membalas pelanggan Anda.</p>
+            <div id="liveInfo" class="bg-gray-50 rounded-lg p-3 text-xs text-gray-700 mb-4"></div>
+            <a href="/dashboard" class="btn-primary inline-block no-underline">Buka Dashboard →</a>
+        </section>
+    </div>
+
+    <style>
+        .input { width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; outline: none; }
+        .input:focus { border-color: #0ea5e9; box-shadow: 0 0 0 2px rgba(14,165,233,0.15); }
+        .btn-primary { background: linear-gradient(135deg,#38B6DF,#3EC9A7); color: #fff; padding: 10px 18px; border-radius: 8px; font-weight: 600; font-size: 14px; }
+        .btn-primary:hover { opacity: .92; }
+        .btn-primary:disabled { opacity: .4; cursor: not-allowed; }
+        .btn-ghost { background: transparent; border: 1px solid #d1d5db; color: #374151; padding: 10px 18px; border-radius: 8px; font-weight: 600; font-size: 14px; }
+        .btn-ghost:hover { background: #f9fafb; }
+        .step-dot { display: inline-block; width: 24px; height: 24px; line-height: 24px; border-radius: 9999px; background: #e5e7eb; color: #6b7280; font-weight: 600; margin-bottom: 4px; }
+        #stepper li.active .step-dot { background: linear-gradient(135deg,#38B6DF,#3EC9A7); color: #fff; }
+        #stepper li.active { color: #0ea5e9; font-weight: 600; }
+        #stepper li.done .step-dot { background: #10b981; color: #fff; }
+    </style>
+
+    <script>
+        let tenantId = '';
+        let uploaded = false;
+
+        function go(step) {
+            document.querySelectorAll('[data-panel]').forEach(p => p.classList.add('hidden'));
+            document.querySelector('[data-panel="' + step + '"]').classList.remove('hidden');
+            document.querySelectorAll('#stepper li').forEach(li => {
+                const s = parseInt(li.dataset.step);
+                li.classList.toggle('active', s === step);
+                li.classList.toggle('done', s < step);
+            });
+            window.scrollTo({ top: 0 });
+        }
+
+        function setStatus(elId, kind, text) {
+            const el = document.getElementById(elId);
+            el.classList.remove('hidden');
+            el.className = 'text-sm mt-3 rounded-lg p-3 ' + (
+                kind === 'error' ? 'bg-red-50 text-red-700' :
+                kind === 'ok' ? 'bg-green-50 text-green-700' : 'bg-yellow-50 text-yellow-700');
+            el.textContent = text;
+        }
+
+        function api(path, opts) {
+            return fetch(path, { headers: { 'Content-Type': 'application/json' }, ...(opts || {}) });
+        }
+
+        async function createTenant() {
+            const merchantName = document.getElementById('merchantName').value.trim();
+            const ownerWa = document.getElementById('ownerWa').value.trim();
+            if (!merchantName || !ownerWa) { setStatus('status1', 'error', 'Nama toko dan nomor WhatsApp wajib diisi.'); return; }
+            const btn = document.getElementById('btn1');
+            btn.disabled = true;
+            try {
+                const res = await api('/api/onboard/tenant', { method: 'POST', body: JSON.stringify({
+                    merchant_name: merchantName,
+                    business_type: document.getElementById('businessType').value,
+                    owner_wa_number: ownerWa
+                })});
+                const d = await res.json();
+                if (!res.ok) throw new Error(d.detail || 'Gagal');
+                tenantId = d.tenant_id;
+                setStatus('status1', 'ok', 'Toko dibuat: ' + tenantId);
+                go(2);
+            } catch (e) {
+                setStatus('status1', 'error', 'Error: ' + e.message);
+            } finally { btn.disabled = false; }
+        }
+
+        const dz = document.getElementById('dropZone');
+        const fi = document.getElementById('fileInput');
+        dz.addEventListener('click', () => fi.click());
+        dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('border-sky-400'); });
+        dz.addEventListener('dragleave', () => dz.classList.remove('border-sky-400'));
+        dz.addEventListener('drop', e => { e.preventDefault(); if (e.dataTransfer.files[0]) uploadFile(e.dataTransfer.files[0]); });
+        fi.addEventListener('change', () => { if (fi.files[0]) uploadFile(fi.files[0]); });
+
+        async function uploadFile(file) {
+            if (!file.name.toLowerCase().endsWith('.xlsx')) { setStatus('uploadStatus', 'error', 'File harus .xlsx.'); return; }
+            setStatus('uploadStatus', 'warn', 'Mengunggah ' + file.name + '...');
+            const fd = new FormData();
+            fd.append('file', file);
+            try {
+                const res = await fetch('/api/onboard/upload', { method: 'POST', body: fd });
+                const d = await res.json();
+                if (!res.ok) throw new Error(d.detail || 'Gagal upload');
+                uploaded = true;
+                document.getElementById('btn2').disabled = false;
+                setStatus('uploadStatus', 'ok', 'Berhasil! ' + d.faq_count + ' FAQ dan ' + d.catalog_count + ' produk terdeteksi.');
+            } catch (e) {
+                setStatus('uploadStatus', 'error', 'Error: ' + e.message);
+            }
+        }
+
+        function downloadTemplate() {
+            const url = 'https://docs.google.com/spreadsheets/d/1bf1bg1s8bjc53v092pZVkGtbCsRLv9DPhhvpeUCjpqA/export?format=xlsx';
+            window.open(url, '_blank');
+        }
+
+        async function provisionDevice() {
+            const device = document.getElementById('deviceWa').value.trim();
+            if (!device) { setStatus('status3', 'error', 'Isi nomor WhatsApp dulu.'); return; }
+            setStatus('status3', 'warn', 'Membuat QR...');
+            try {
+                const res = await api('/api/onboard/device', { method: 'POST', body: JSON.stringify({ device_wa: device })});
+                const d = await res.json();
+                if (!res.ok) throw new Error(d.detail || 'Gagal');
+                const qrBox = document.getElementById('qrBox');
+                qrBox.classList.remove('hidden');
+                const qrImg = document.getElementById('qrImg');
+                if (d.qr) {
+                    qrImg.src = 'data:image/png;base64,' + d.qr;
+                    document.getElementById('qrStatus').textContent = 'Scan QR dengan WhatsApp di HP.';
+                } else if (d.device_status === 'connected') {
+                    qrImg.removeAttribute('src');
+                    document.getElementById('qrStatus').textContent = '✅ Device sudah terhubung.';
+                } else {
+                    qrImg.removeAttribute('src');
+                    document.getElementById('qrStatus').textContent = 'QR kosong — ' + (d.note || '');
+                }
+                setStatus('status3', 'ok', 'Perangkat diproses.');
+            } catch (e) { setStatus('status3', 'error', 'Error: ' + e.message); }
+        }
+
+        async function saveTierAndContinue() {
+            const tier = document.getElementById('tier').value;
+            setStatus('status3', 'warn', 'Menyimpan paket...');
+            try {
+                const res = await api('/api/onboard/tier', { method: 'POST', body: JSON.stringify({ tier })});
+                const d = await res.json();
+                if (!res.ok) throw new Error(d.detail || 'Gagal');
+                setStatus('status3', 'ok', 'Paket ' + tier + ' tersimpan.');
+                go(4);
+            } catch (e) { setStatus('status3', 'error', 'Error: ' + e.message); }
+        }
+
+        const dzp = document.getElementById('dropZonePhoto');
+        const pfi = document.getElementById('photoInput');
+        dzp.addEventListener('click', () => pfi.click());
+        dzp.addEventListener('dragover', e => { e.preventDefault(); dzp.classList.add('border-sky-400'); });
+        dzp.addEventListener('dragleave', () => dzp.classList.remove('border-sky-400'));
+        dzp.addEventListener('drop', e => { e.preventDefault(); if (e.dataTransfer.files[0]) uploadPhoto(e.dataTransfer.files[0]); });
+        pfi.addEventListener('change', () => { if (pfi.files[0]) uploadPhoto(pfi.files[0]); });
+
+        async function uploadPhoto(file) {
+            if (!/\.(png|jpg|jpeg|webp)$/i.test(file.name)) { setStatus('photoStatus', 'error', 'Format harus png/jpg/jpeg/webp.'); return; }
+            setStatus('photoStatus', 'warn', 'Mengunggah ' + file.name + '...');
+            const fd = new FormData();
+            fd.append('file', file);
+            try {
+                const res = await fetch('/api/onboard/media', { method: 'POST', body: fd });
+                const d = await res.json();
+                if (!res.ok) throw new Error(d.detail || 'Gagal upload');
+                setStatus('photoStatus', 'ok', '✅ Foto "' + file.name + '" tersimpan. Akan dikirim sebagai foto asli saat produk ditanya.');
+            } catch (e) { setStatus('photoStatus', 'error', 'Error: ' + e.message); }
+        }
+
+        function appendBubble(text, from) {
+            const box = document.getElementById('chatBox');
+            const d = document.createElement('div');
+            d.className = 'p-2 rounded-lg max-w-[80%] text-sm ' +
+                (from === 'user' ? 'ml-auto bg-sky-500 text-white' : 'bg-white border border-gray-200 text-gray-800');
+            d.textContent = text;
+            box.appendChild(d);
+            box.scrollTop = box.scrollHeight;
+        }
+
+        async function sendTest() {
+            const msg = document.getElementById('testMsg').value.trim();
+            if (!msg) return;
+            appendBubble(msg, 'user');
+            document.getElementById('testMsg').value = '';
+            try {
+                const res = await api('/api/provision/test-chat', { method: 'POST', body: JSON.stringify({ tenant_id: tenantId, message: msg })});
+                const d = await res.json();
+                appendBubble(res.ok ? (d.reply || '(kosong)') : ('⚠️ ' + (d.detail || 'Gagal')), 'bot');
+            } catch (e) { appendBubble('⚠️ ' + e.message, 'bot'); }
+        }
+
+        async function init() {
+            try {
+                const res = await api('/api/auth/me');
+                if (!res.ok) { window.location = '/masuk'; return; }
+                const d = await res.json();
+                if (d.tenant && d.tenant.tenant_id) {
+                    tenantId = d.tenant.tenant_id;
+                    document.getElementById('merchantName').value = (JSON.parse(d.tenant.onboarding_data || '{}').merchant_name) || '';
+                    document.getElementById('ownerWa').value = d.tenant.owner_wa_number;
+                    document.getElementById('liveInfo').textContent = 'Tenant ID: ' + tenantId;
+                }
+            } catch (e) { window.location = '/masuk'; }
+        }
+        init();
+        go(1);
+    </script>
+</body>
+</html>

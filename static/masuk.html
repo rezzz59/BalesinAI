@@ -19,23 +19,49 @@
     <span class="eyebrow">Selamat datang kembali</span>
     <h1 class="display">Masuk ke akun Anda</h1>
     <p class="sub">Lanjut pantau order dan obrolan toko Anda.</p>
-    <form>
+    <form onsubmit="login(event)">
       <div class="field">
         <label for="email">Email</label>
-        <input id="email" type="email" placeholder="nama@tokokamu.com" autocomplete="email">
+        <input id="email" type="email" placeholder="nama@tokokamu.com" autocomplete="email" required>
       </div>
       <div class="field">
         <label for="password">Kata sandi</label>
-        <input id="password" type="password" placeholder="••••••••" autocomplete="current-password">
-        <div class="hint">Lupa kata sandi? Hubungi kami via WhatsApp.</div>
+        <input id="password" type="password" placeholder="••••••••" autocomplete="current-password" required>
       </div>
-      <button class="btn primary" type="submit">Masuk</button>
-      <div class="auth-note">Fitur login sedang disiapkan. Sementara itu, silakan hubungi kami via WhatsApp untuk akses akun Anda.</div>
+      <button class="btn primary" type="submit" id="loginBtn">Masuk</button>
+      <div class="auth-note" id="authNote"></div>
     </form>
     <p class="auth-alt">Belum punya akun? <a href="/daftar">Coba gratis</a></p>
   </div>
 </section>
 
+<script>
+  async function login(e) {
+    e.preventDefault();
+    const btn = document.getElementById('loginBtn');
+    const note = document.getElementById('authNote');
+    note.style.display = 'block';
+    note.className = 'auth-note text-amber-700';
+    note.textContent = 'Memeriksa...';
+    btn.disabled = true;
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: document.getElementById('email').value.trim(),
+          password: document.getElementById('password').value
+        })
+      });
+      const d = await res.json();
+      if (!res.ok) { note.className = 'auth-note text-red-600'; note.textContent = d.detail || 'Gagal masuk.'; return; }
+      window.location = '/onboard';
+    } catch (err) {
+      note.className = 'auth-note text-red-600';
+      note.textContent = 'Error: ' + err.message;
+    } finally { btn.disabled = false; }
+  }
+</script>
 <script src="/static/assets/landing.js"></script>
 </body>
 </html>

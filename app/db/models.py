@@ -34,10 +34,66 @@ class TenantConfig(Base):
     onboarding_status: Mapped[str] = mapped_column(String, nullable=False, default="pending")
     onboarding_data: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
     fonnte_device_id: Mapped[str] = mapped_column(String, nullable=False, default="")
+    data_source: Mapped[str] = mapped_column(String, nullable=False, default="sheet")  # "sheet" | "upload"
+    tier: Mapped[str] = mapped_column(String, nullable=False, default="basic")  # basic|pro|enterprise
+    device_status: Mapped[str] = mapped_column(String, nullable=False, default="fresh")  # fresh|pending|connected|disconnected
+    gateway_plan: Mapped[str] = mapped_column(String, nullable=False, default="lite")  # lite|super|waba
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=_utcnow, onupdate=_utcnow, nullable=False
     )
+
+
+class User(Base):
+    """A Balesin.ai account (merchant owner). Email + password auth."""
+
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    email: Mapped[str] = mapped_column(String, nullable=False, unique=True, index=True)
+    full_name: Mapped[str] = mapped_column(String, nullable=False, default="")
+    password_hash: Mapped[str] = mapped_column(String, nullable=False)
+    password_salt: Mapped[str] = mapped_column(String, nullable=False)
+    tenant_id: Mapped[str] = mapped_column(String, nullable=False, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+
+
+class SessionToken(Base):
+    """Server-side session for a logged-in user (cookie: balesin_session)."""
+
+    __tablename__ = "sessions"
+
+    token: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
+class FaqRow(Base):
+    """FAQ item uploaded from XLSX (data_source='upload')."""
+
+    __tablename__ = "faq_rows"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    pertanyaan: Mapped[str] = mapped_column(Text, nullable=False)
+    jawaban: Mapped[str] = mapped_column(Text, nullable=False)
+    row_no: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+
+
+class CatalogRow(Base):
+    """Catalog item uploaded from XLSX (merchant='upload')."""
+
+    __tablename__ = "catalog_rows"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    nama_produk: Mapped[str] = mapped_column(String, nullable=False)
+    harga: Mapped[str] = mapped_column(String, nullable=False, default="")
+    ready: Mapped[str] = mapped_column(String, nullable=False, default="")
+    deskripsi: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
 
 
 class ProvisioningToken(Base):
