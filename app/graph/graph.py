@@ -137,7 +137,10 @@ def _compose_fallback_node(state):
     """
     reason = fallback_reason_for(state) or "no_match"
     return {
-        "reply_text": "Sedang kami cek, owner akan follow up ya 🙏",
+        "reply_text": (
+            "Mohon tunggu sebentar ya Kak, kami cek dulu ke tim. 😊 "
+            "Sambil menunggu, boleh kami bantu cari yang lain?"
+        ),
         "action": "fallback",
         "fallback_reason": reason,
     }

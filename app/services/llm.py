@@ -149,9 +149,9 @@ class MockLLMClient(LLMClient):
     ) -> str:
         """Provide a deterministic dummy reply that mirrors source-row facts."""
         if not retrieved_row:
-            return "Terima kasih! Kami akan membantu Anda segera."
+            return "Terima kasih! Kami akan membantu Anda segera. Boleh kami bantu cari produk yang lainnya, Kak?"
         if isinstance(retrieved_row, str):
-            return f"Terima kasih telah menghubungi kami. {retrieved_row}"
+            return f"Terima kasih telah menghubungi kami. {retrieved_row} Boleh dibantu cari yang lainnya, Kak?"
         answer = (
             retrieved_row.get("jawaban")
             or retrieved_row.get("answer")
@@ -162,8 +162,8 @@ class MockLLMClient(LLMClient):
             or ""
         )
         if answer:
-            return f"Terima kasih telah menghubungi kami. {answer}"
-        return "Terima kasih telah menghubungi kami."
+            return f"Terima kasih telah menghubungi kami. {answer} Boleh dibantu cari yang lainnya, Kak?"
+        return "Terima kasih telah menghubungi kami. Boleh dibantu cari yang lainnya, Kak?"
 
     def compose_reply_with_history(
         self,

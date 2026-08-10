@@ -4,23 +4,45 @@ from app.services.reply_validator import validate_sales_style
 
 def test_short_reply_passes():
     """OK if reply is within sentence limit, single emoji, no listener violation."""
-    ok, msg = validate_sales_style("Halo Kak, produk ini ready ya 😊")
+    ok, msg = validate_sales_style("Halo Kak, produk ini ready ya 😊 Mau pesan yang mana?")
     assert ok is True
     assert msg == "OK"
 
 
-def test_long_reply_fails():
-    """Reply with more than 3 sentences should be rejected."""
+def test_reply_without_question_fails():
+    """Persona rule: never end a message without a guiding question."""
+    ok, msg = validate_sales_style("Halo Kak, produk ini ready ya 😊")
+    assert ok is False
+    assert "question" in msg.lower()
+
+
+def test_multiple_questions_fails():
+    """Persona rule: max 1 question per message (decision fatigue)."""
     ok, msg = validate_sales_style(
-        "Ini kalimat satu. Ini kalimat dua. Ini kalimat tiga. Ini kalimat empat."
+        "Halo Kak, produknya ready ya 😊 Mau pesan yang mana? Sekalian ukurannya mau apa? 😊"
+    )
+    assert ok is False
+    assert "more than 1 question" in msg.lower()
+
+
+def test_two_emojis_passes():
+    """Persona allows up to 2 emojis per message."""
+    ok, msg = validate_sales_style("Halo Kak! Produknya ready ya 😊 Mau pesan yang mana? 🙏")
+    assert ok is True
+
+
+def test_long_reply_fails():
+    """Reply with more than 6 sentences should be rejected."""
+    ok, msg = validate_sales_style(
+        "Kalimat satu. Kalimat dua. Kalimat tiga. Kalimat empat. Kalimat lima. Kalimat enam. Kalimat tujuh."
     )
     assert ok is False
     assert "sentences" in msg.lower()
 
 
 def test_multiple_emojis_fails():
-    """Reply with more than 1 emoji should be rejected."""
-    ok, msg = validate_sales_style("Kak, ada 😊 sekali 😊")
+    """Reply with more than 2 emojis should be rejected."""
+    ok, msg = validate_sales_style("Kak, ada 😊 sekali 😊 emang 😊 ya")
     assert ok is False
     assert "emoji" in msg.lower()
 
@@ -44,12 +66,12 @@ def test_no_user_message():
 
 def test_exact_size_reference_passes():
     """Don't flag if reply doesn't repeat the attribute word as a question."""
-    ok, msg = validate_sales_style("Ukuran M yang Anda pesan sudah kami siapkan.",
+    ok, msg = validate_sales_style("Ukuran M yang Anda pesan sudah kami siapkan. Mau lanjut konfirmasi alamatnya, Kak?",
                                    user_message="Saya mau ukura M")
     assert ok is True or "listener" not in msg
 
 
 def test_one_sentence_single_emoji_ok():
     """Single emoji and one sentence passes."""
-    ok, msg = validate_sales_style("Terima kasih! 👍")
+    ok, msg = validate_sales_style("Terima kasih! Mau dibantu apa lagi, Kak? 👍")
     assert ok is True

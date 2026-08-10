@@ -5,6 +5,7 @@ from typing import Any
 
 from app.graph.state import ChatState
 from app.services.llm import LLMError, LLMValidationError, validate_reply
+from app.services.reply_validator import validate_sales_style
 from app.services.semantic_search import SemanticSearchClient, SemanticSearchError
 from app.services.sheets import FAQ_MATCH_THRESHOLD, _score_faq_row
 
@@ -387,8 +388,9 @@ def _compose_with_llm(state: ChatState, llm_client: Any) -> dict:
     # 1. Order confirmation: short template, no LLM.
     if intent == "confirm_order":
         reply = (
-            "Terima kasih ordernya! Owner akan follow up untuk konfirmasi "
-            "pembayaran ya 🙏"
+            "Order Kakak kami catat, terima kasih banyak! 🎉 "
+            "Tim kami akan konfirmasi detailnya segera ya. "
+            "Boleh tahu metode bayarnya mau pakai apa, Kak — transfer atau e-wallet? 😊"
         )
         # Append user message to history, then add assistant reply
         messages = state.get("messages", []) or []
@@ -404,11 +406,18 @@ def _compose_with_llm(state: ChatState, llm_client: Any) -> dict:
         "Restrict your reply to ONLY facts from the source row above. Do not invent "
         "prices, sizes, colors, or stock status.]"
     )
+    style_hint = (
+        "\n\n[Style hint: your reply must END with exactly ONE guiding question that "
+        "invites the buyer to reply (and no more than one question in total). Never "
+        "end with a plain statement, a price list, or passive thanks — otherwise the "
+        "buyer will stop replying (ghosting).]"
+    )
 
     # 2-5. Try up to 2 attempts (initial + 1 retry) before falling back.
+    retry_hint = strict_hint
     for attempt in range(2):
         try:
-            message_for_call = message if attempt == 0 else f"{message}{strict_hint}"
+            message_for_call = message if attempt == 0 else f"{message}{retry_hint}"
             reply = llm_client.compose_reply_with_history(
                 messages=state.get("messages", []) or [],
                 message=message_for_call,
@@ -418,6 +427,9 @@ def _compose_with_llm(state: ChatState, llm_client: Any) -> dict:
                 persona=persona,  # Store-persona instruction per business_type
             )
             validate_reply(reply, retrieved_row)
+            ok_style, style_msg = validate_sales_style(reply, message)
+            if not ok_style:
+                raise LLMValidationError(f"Sales style: {style_msg}")
             # Append to conversation history before returning
             messages = (state.get("messages", []) or []) + [
                 {"role": "user", "content": message},
@@ -429,6 +441,8 @@ def _compose_with_llm(state: ChatState, llm_client: Any) -> dict:
                 "messages": messages,
             }
         except LLMValidationError as e:
+            if "question" in str(e) or "emoji" in str(e) or "sentences" in str(e):
+                retry_hint = style_hint
             logger.warning(
                 "compose_validation_failed",
                 extra={
@@ -478,9 +492,10 @@ def _verbatim_fallback(state: ChatState) -> dict:
     if state.get("catalog_answer"):
         return {
             "reply_text": (
-                f"Halo Kak, kami catat dulu ya 🙏\n\n"
+                f"Halo Kak, berikut info yang kami punya ya 😊\n\n"
                 f"{state['catalog_answer']}\n\n"
-                f"Untuk detail yang lebih spesifik, kami akan forward ke owner ya Kak."
+                f"Kalau masih ada yang ingin ditanyakan, silakan sampaikan saja Kak — "
+                f"kami cek dulu ke tim. Sekalian, Kakak sedang cari produk apa?"
             ),
             "action": "reply",
         }
@@ -500,7 +515,10 @@ def _verbatim_fallback(state: ChatState) -> dict:
 
 def _compose_fallback_message(state: ChatState, reason: str) -> dict:
     return {
-        "reply_text": "Sedang kami cek, owner will follow up ya 🙏",
+        "reply_text": (
+            "Mohon tunggu sebentar ya Kak, kami cek dulu ke tim. 😊 "
+            "Sambil menunggu, boleh kami bantu cari yang lain?"
+        ),
         "action": "fallback",
         "fallback_reason": reason,
     }
@@ -548,9 +566,7 @@ def _format_browse_reply(products: list[dict]) -> str:
         lines.append(f"- (+{hidden} kategori lain, sebut aja yang Kakak cari)")
     total = len(products)
     lines.append("")
-    lines.append(
-        f"Total ada {total} varian ready. Sebut aja nama produknya ya kak 😊"
-    )
+    lines.append(f"Total ada {total} varian ready. Mau dibantu cari yang mana, Kak? 😊")
     return "\n".join(lines)
 
 
@@ -766,7 +782,10 @@ async def fallback_human(state: ChatState, gateway_client: Any) -> dict:
         # 2. Send acknowledgement to buyer
         await gateway_client.send_message(
             phone=state["wa_number"],
-            message="Sedang kami cek, owner akan follow up ya 🙏",
+            message=(
+                "Mohon tunggu sebentar ya Kak, kami cek dulu ke tim. 😊 "
+                "Sambil menunggu, boleh kami bantu cari yang lain?"
+            ),
         )
         logger.info(
             "fallback_triggered",
@@ -939,9 +958,8 @@ def _format_order_confirmation(
     ref = f" ({order_code})" if order_code else ""
     if not items:
         return (
-            f"Noted Kak 🙏 Order kamu tercatat{ref}. "
-            "Sebelum lanjut, boleh sebutkan produk & jumlahnya ya? "
-            "Contoh: 'kaos hitam 2 pcs'. Owner juga akan follow up ya 🙏"
+            f"Noted Kak 🙏 Order kamu tercatat{ref}. Sebelum lanjut, boleh sebutkan "
+            f"produk & jumlahnya ya, Kak? Contoh: 'kaos hitam 2 pcs' 😊"
         )
     lines = [f"Order diterima{ref}! 🎉", ""]
     for it in items:
@@ -958,7 +976,10 @@ def _format_order_confirmation(
     if buyer_address:
         lines.append(f"Alamat: {buyer_address}")
     lines.append("")
-    lines.append("Kami kirimkan detailnya ke owner, owner akan konfirmasi ya 🙏")
+    lines.append(
+        "Order sudah kami catat, Kak 🙏 Tim kami akan konfirmasi pesanannya. "
+        "Boleh tahu, Kakak mau bayar dengan metode apa — transfer atau e-wallet? 😊"
+    )
     return "\n".join(lines)
 
 

@@ -162,12 +162,12 @@ def test_compose_reply_uses_no_match_prompt_when_match_kind_none():
         def compose_reply(self, message, retrieved_row, match_kind, customer_context=None, persona=None):
             self.captured_kind = match_kind
             self.captured_row = retrieved_row
-            return "Mohon maaf, produk belum tersedia."
+            return "Mohon maaf, produk belum tersedia. Boleh kami bantu cari yang lain, Kak?"
 
         def compose_reply_with_history(self, messages, message, retrieved_row, match_kind, customer_context=None, persona=None):
             self.captured_kind = match_kind
             self.captured_row = retrieved_row
-            return "Mohon maaf, produk belum tersedia."
+            return "Mohon maaf, produk belum tersedia. Boleh kami bantu cari yang lain, Kak?"
 
     llm = CaptureLLM()
     update = compose_reply(state, llm_client=llm)
@@ -277,7 +277,7 @@ def test_compose_reply_skips_llm_for_confirm_order():
         def classify_with_history(self, messages):
             return {"intent": "faq", "confidence": 0.5, "has_complaint_signal": False, "sentiment": "neutral"}
         def compose_reply_with_history(self, messages, message, retrieved_row, match_kind, customer_context=None, persona=None):
-            return "Mohon maaf, produk belum tersedia."
+            return "Mohon maaf, produk belum tersedia. Boleh kami bantu cari yang lain, Kak?"
         def classify(self, message):
             return {"intent": "confirm_order", "confidence": 0.9}
 
@@ -289,7 +289,7 @@ def test_compose_reply_skips_llm_for_confirm_order():
     update = compose_reply(state, llm_client=llm)
     assert llm.called is False
     assert update["action"] == "order"
-    assert "Owner akan follow up" in update["reply_text"]
+    assert "metode bayar" in update["reply_text"]
 
 
 def test_compose_reply_skips_llm_for_browse_mode():
@@ -309,7 +309,7 @@ def test_compose_reply_skips_llm_for_browse_mode():
         def classify_with_history(self, messages):
             return {"intent": "faq", "confidence": 0.5, "has_complaint_signal": False, "sentiment": "neutral"}
         def compose_reply_with_history(self, messages, message, retrieved_row, match_kind, customer_context=None, persona=None):
-            return "Mohon maaf, produk belum tersedia."
+            return "Mohon maaf, produk belum tersedia. Boleh kami bantu cari yang lain, Kak?"
         def classify(self, message):
             return {"intent": "check_product", "confidence": 0.9}
 
@@ -340,19 +340,19 @@ def test_compose_reply_fallback_when_no_data_anywhere():
         def classify_with_history(self, messages):
             return {"intent": "faq", "confidence": 0.5, "has_complaint_signal": False, "sentiment": "neutral"}
         def compose_reply_with_history(self, messages, message, retrieved_row, match_kind, customer_context=None, persona=None):
-            return "Mohon maaf, produk belum tersedia."
+            return "Mohon maaf, produk belum tersedia. Boleh kami bantu cari yang lain, Kak?"
         def classify(self, message):
             return {"intent": "faq", "confidence": 0.4}
 
         def compose_reply(self, message, retrieved_row, match_kind, customer_context=None, persona=None):
             self.called = True
             self.captured_row = retrieved_row
-            return "Halo Kak! Kami cek dulu ya 🙏"
+            return "Halo Kak! Kami cek dulu ya 🙏 Boleh dibantu cari yang lain, Kak?"
 
         def compose_reply_with_history(self, messages, message, retrieved_row, match_kind, customer_context=None, persona=None):
             self.called = True
             self.captured_row = retrieved_row
-            return "Halo Kak! Kami cek dulu ya 🙏"
+            return "Halo Kak! Kami cek dulu ya 🙏 Boleh dibantu cari yang lain, Kak?"
 
     state = _base_high_state()
     state["match_kind"] = "none"
@@ -386,7 +386,7 @@ def test_compose_reply_falls_back_when_llm_raises_on_no_match():
     state["product_match"] = None
     update = compose_reply(state, llm_client=FailingLLM())
     assert update["action"] == "fallback"
-    assert "owner" in update["reply_text"].lower()
+    assert "kami cek dulu ke tim" in update["reply_text"].lower()
 
 
 # ---------------------------------------------------------------------------
@@ -442,7 +442,7 @@ def test_built_graph_runs_end_to_end_with_llm_client():
         def classify_with_history(self, messages):
             return {"intent": "faq", "confidence": 0.7, "has_complaint_signal": False, "sentiment": "neutral"}
         def compose_reply_with_history(self, messages, message, retrieved_row, match_kind, customer_context=None, persona=None):
-            return "Mohon maaf, produk belum tersedia."
+            return "Mohon maaf, produk belum tersedia. Boleh kami bantu cari yang lain, Kak?"
         def __init__(self):
             self._mock = MockLLMClient()
             self.compose_calls = 0

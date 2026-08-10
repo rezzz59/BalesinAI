@@ -61,7 +61,7 @@ def test_compose_reply_confirm_order():
     }
     result = compose_reply(state, llm_client=MockLLMClient())
     assert result["action"] == "order"
-    assert "Owner akan follow up" in result["reply_text"]
+    assert "metode bayar" in result["reply_text"]
 
 
 @pytest.mark.asyncio

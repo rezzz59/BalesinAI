@@ -30,16 +30,16 @@ class MockE2E(LLMClient):
         if key in self.responses:
             return self.responses[key]
         if "lubang" in message.lower():
-            return "Mohon maaf, produk kami bisa diganti atau dikembalikan karena rusak."
+            return "Mohon maaf, produk kami bisa diganti atau dikembalikan karena rusak. Boleh kami bantu proses penggantiannya sekarang, Kak?"
         elif "garansi" in message.lower():
-            return "Garansi produk kami 1 bulan dari tanggal pembelian."
+            return "Garansi produk kami 1 bulan dari tanggal pembelian. Ada yang mau ditanyakan lagi, Kak?"
         elif "harga" in message.lower():
-            return "Untuk informasi harga, silakan hubungi kami."
+            return "Untuk informasi harga, silakan hubungi kami. Boleh dibantu produk yang mana, Kak?"
         elif "ada" in message.lower() and "kaos" in message.lower():
-            return "Kaos hitam ukuran L tersedia di gudang."
+            return "Kaos hitam tersedia di gudang. Mau dibantu pesan kaosnya sekarang, Kak?"
         elif "Saya mau order" in message:
-            return "Owner akan follow up via WhatsApp untuk konfirmasi pesanan Anda."
-        return "Terima kasih pesannya sudah kami terima."
+            return "Owner akan follow up via WhatsApp untuk konfirmasi pesanan Anda. Boleh dibantu nama dan alamat pengirimannya, Kak?"
+        return "Terima kasih pesannya sudah kami terima. Boleh kami bantu apa lagi, Kak?"
 
     def compose_reply_with_history(self, messages, message, retrieved_row, match_kind, customer_context=None, persona=None):
         return self.compose_reply(message, retrieved_row, match_kind, customer_context)
@@ -121,11 +121,11 @@ def test_e2e_customer_context_is_propagated():
     class CapturingLLM(MockE2E):
         def compose_reply(self, message, retrieved_row, match_kind, customer_context=None, persona=None):
             captured_context["ctx"] = customer_context
-            return "Responding normally"
+            return "Responding normally. Boleh dibantu apa lagi, Kak?"
 
         def compose_reply_with_history(self, messages, message, retrieved_row, match_kind, customer_context=None, persona=None):
             captured_context["ctx"] = customer_context
-            return "Responding normally"
+            return "Responding normally. Boleh dibantu apa lagi, Kak?"
 
     llm = CapturingLLM()
     graph = _build_mock_graph(llm_client=llm)
@@ -189,7 +189,7 @@ def test_order_confirmation_shortcuts_llm():
 
     assert call_count["value"] == 0, f"LLM compose was called {call_count['value']} times for order confirmation"
     assert result.get("action") == "order"
-    assert "follow up" in str(result.get("reply_text", "")).lower()
+    assert "order kamu tercatat" in str(result.get("reply_text", "")).lower()
 
 
 # ============================================
@@ -575,4 +575,4 @@ def test_multi_turn_order_shortcut():
 
         assert order_called["value"] is True, "Order intent should be detected by classify"
         assert result.get("action") == "order", f"Expected order action, got {result.get('action')}"
-        assert "follow up" in str(result.get("reply_text", "")).lower(), "Reply should contain follow-up content"
+        assert "order kamu tercatat" in str(result.get("reply_text", "")).lower(), "Reply should confirm the order"
