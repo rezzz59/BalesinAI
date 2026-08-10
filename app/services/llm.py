@@ -271,13 +271,14 @@ class AdaCodeLLMClient(LLMClient):
             intent = data.get("intent", "").lower()
             confidence = float(data.get("confidence", 0))
             sentiment = data.get("sentiment", "neutral").lower()
+            complaint = bool(data.get("has_complaint_signal", False))
             if intent not in VALID_INTENTS:
                 raise LLMValidationError(f"Invalid intent from AdaCode: {intent!r}")
             if not (0 <= confidence <= 1):
                 raise LLMValidationError(f"Confidence out of range: {confidence}")
             if sentiment not in VALID_SENTIMENTS:
                 sentiment = "neutral"
-            return {"intent": intent, "confidence": confidence, "sentiment": sentiment}
+            return {"intent": intent, "confidence": confidence, "has_complaint_signal": complaint, "sentiment": sentiment}
         except (json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
             raise LLMValidationError(f"Failed to parse AdaCode classification: {e}") from e
 
@@ -399,13 +400,14 @@ class GeminiLLMClient(LLMClient):
             intent = data.get("intent", "").lower()
             confidence = float(data.get("confidence", 0))
             sentiment = data.get("sentiment", "neutral").lower()
+            complaint = bool(data.get("has_complaint_signal", False))
             if intent not in VALID_INTENTS:
                 raise LLMValidationError(f"Invalid intent: {intent!r}")
             if not (0 <= confidence <= 1):
                 raise LLMValidationError(f"Confidence out of range: {confidence}")
             if sentiment not in VALID_SENTIMENTS:
                 sentiment = "neutral"
-            return {"intent": intent, "confidence": confidence, "sentiment": sentiment}
+            return {"intent": intent, "confidence": confidence, "has_complaint_signal": complaint, "sentiment": sentiment}
         except (json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
             raise LLMValidationError(f"Failed to parse classification: {e}") from e
 
@@ -539,13 +541,14 @@ class AnthropicLLMClient(LLMClient):
             intent = data.get("intent", "").lower()
             confidence = float(data.get("confidence", 0))
             sentiment = data.get("sentiment", "neutral").lower()
+            complaint = bool(data.get("has_complaint_signal", False))
             if intent not in VALID_INTENTS:
                 raise LLMValidationError(f"Invalid intent: {intent!r}")
             if not (0 <= confidence <= 1):
                 raise LLMValidationError(f"Confidence out of range: {confidence}")
             if sentiment not in VALID_SENTIMENTS:
                 sentiment = "neutral"
-            return {"intent": intent, "confidence": confidence, "sentiment": sentiment}
+            return {"intent": intent, "confidence": confidence, "has_complaint_signal": complaint, "sentiment": sentiment}
         except (json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
             raise LLMValidationError(f"Failed to parse classification: {e}") from e
 

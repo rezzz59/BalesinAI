@@ -780,12 +780,19 @@ async def fallback_human(state: ChatState, gateway_client: Any) -> dict:
                 message=owner_msg,
             )
         # 2. Send acknowledgement to buyer
-        await gateway_client.send_message(
-            phone=state["wa_number"],
-            message=(
+        if state.get("has_complaint_signal"):
+            buyer_ack = (
+                "Mohon maaf ya Kak atas ketidaknyamanannya 🙏 Kami cek dulu ke tim. "
+                "Boleh dibantu, solusi seperti apa yang Kakak harapkan?"
+            )
+        else:
+            buyer_ack = (
                 "Mohon tunggu sebentar ya Kak, kami cek dulu ke tim. 😊 "
                 "Sambil menunggu, boleh kami bantu cari yang lain?"
-            ),
+            )
+        await gateway_client.send_message(
+            phone=state["wa_number"],
+            message=buyer_ack,
         )
         logger.info(
             "fallback_triggered",
