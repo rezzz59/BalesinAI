@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     google_sheets_credentials_json_path: str = "./secrets/sheets-sa.json"
     google_sheets_spreadsheet_id: str = ""  # filled from tenant context or env
     webhook_auth_token: str = ""  # Secret for webhook endpoint authentication (Bearer token)
+    cors_allowed_origins: str = "http://localhost:3000,http://localhost:8000,http://127.0.0.1:3000,http://127.0.0.1:8000"
 
     # Optional with defaults
     checkpointer_db_path: str = "./data/checkpoints.db"

@@ -13,12 +13,16 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 SESSION_COOKIE = "balesin_session"
 
 
-def _set_session_cookie(response: Response, token: str) -> None:
+def _set_session_cookie(response: Response, token: str, request: Request | None = None) -> None:
+    is_secure = False
+    if request is not None:
+        is_secure = request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https"
     response.set_cookie(
         SESSION_COOKIE,
         token,
         max_age=user_repo.SESSION_TTL_HOURS * 3600,
         httponly=True,
+        secure=is_secure,
         samesite="lax",
         path="/",
     )
@@ -47,7 +51,7 @@ async def register(request: Request):
 
     session = user_repo.create_session(user.id)
     response = JSONResponse({"status": "ok", "user_id": user.id, "email": user.email})
-    _set_session_cookie(response, session.token)
+    _set_session_cookie(response, session.token, request=request)
     return response
 
 
@@ -62,7 +66,7 @@ async def login(request: Request):
 
     session = user_repo.create_session(user.id)
     response = JSONResponse({"status": "ok", "user_id": user.id, "email": user.email})
-    _set_session_cookie(response, session.token)
+    _set_session_cookie(response, session.token, request=request)
     return response
 
 

@@ -1,11 +1,9 @@
 """SQLite-backed graph checkpoint saver for LangGraph.
 
-Implements a minimal Saver interface that persists checkpoints in the existing DB engine.
-The state is pickled for simplicity (only used internally; not exposed).
+Implements a saver interface that persists checkpoints safely in the DB engine using JSON.
 """
 import json
 import logging
-import pickle  # nosec - internal only
 from typing import Any, Optional
 
 from sqlalchemy import Engine
@@ -41,23 +39,23 @@ class SqliteCheckpointer:
         self._factory = sessionmaker(bind=engine, expire_on_commit=False)
 
     def save(self, config: dict[str, Any], fnode_id: str, state: Any) -> None:
-        """Persist a checkpoint.
+        """Persist a checkpoint safely as JSON string.
 
         Args:
             config: langgraph config dict (e.g. {"configurable": {"thread_id": "..."}})
             fnode_id: identifier of the finishing node for this step
-            state: picklable state object to persist
+            state: state object to persist
         """
         config_key = _serialize_config(config)
-        pickled = pickle.dumps(state)
+        serialized_state = json.dumps(state, default=str)
         session: Session = self._factory()
         try:
             existing = session.get(Checkpoint, (config_key, fnode_id))
             if existing:
-                existing.state = pickled
+                existing.state = serialized_state
             else:
                 session.add(
-                    Checkpoint(config_key=config_key, fnode_id=fnode_id, state=pickled)
+                    Checkpoint(config_key=config_key, fnode_id=fnode_id, state=serialized_state)
                 )
             session.commit()
         except Exception as e:
@@ -75,7 +73,11 @@ class SqliteCheckpointer:
             row = session.get(Checkpoint, (config_key, fnode_id))
             if row is None:
                 return None
-            return pickle.loads(row.state)  # nosec - internal only
+            try:
+                return json.loads(row.state)
+            except (json.JSONDecodeError, TypeError):
+                # Fallback for legacy format or corrupted row
+                return None
         finally:
             session.close()
 

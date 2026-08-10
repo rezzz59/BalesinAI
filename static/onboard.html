@@ -219,11 +219,17 @@
         }
 
         async function provisionDevice() {
-            const device = document.getElementById('deviceWa').value.trim();
-            if (!device) { setStatus('status3', 'error', 'Isi nomor WhatsApp dulu.'); return; }
+            const raw = document.getElementById('deviceWa').value.trim();
+            if (!raw) { setStatus('status3', 'error', 'Isi nomor WhatsApp dulu.'); return; }
+            // client-side sanity check (server re-validates + normalizes to 62...)
+            const digits = raw.replace(/\D/g, '');
+            if (digits.length < 8 || digits.length > 16) {
+                setStatus('status3', 'error', 'Nomor tidak valid. Gunakan 08xx atau 628xx (9-15 digit).');
+                return;
+            }
             setStatus('status3', 'warn', 'Membuat QR...');
             try {
-                const res = await api('/api/onboard/device', { method: 'POST', body: JSON.stringify({ device_wa: device })});
+                const res = await api('/api/onboard/device', { method: 'POST', body: JSON.stringify({ device_wa: raw })});
                 const d = await res.json();
                 if (!res.ok) throw new Error(d.detail || 'Gagal');
                 const qrBox = document.getElementById('qrBox');
@@ -231,7 +237,8 @@
                 const qrImg = document.getElementById('qrImg');
                 if (d.qr) {
                     qrImg.src = 'data:image/png;base64,' + d.qr;
-                    document.getElementById('qrStatus').textContent = 'Scan QR dengan WhatsApp di HP.';
+                    document.getElementById('qrStatus').textContent =
+                        'Scan QR dengan nomor WhatsApp yang ingin jadi bot (nomor yang di-scan lah yang terhubung).';
                 } else if (d.device_status === 'connected') {
                     qrImg.removeAttribute('src');
                     document.getElementById('qrStatus').textContent = '✅ Device sudah terhubung.';

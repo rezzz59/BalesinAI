@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.api.auth import router as auth_router
+from app.api.auth import current_user, router as auth_router
 from app.api.onboard import router as onboard_router
 from app.api.provision import router as provision_router
 from app.config import get_settings
@@ -58,9 +58,15 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+allowed_origins = [
+    origin.strip()
+    for origin in get_settings().cors_allowed_origins.split(",")
+    if origin.strip()
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allowed_origins or ["http://localhost:3000", "http://localhost:8000"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -127,16 +133,33 @@ def _reset_tenant_clients(tenant_id: str | None = None):
 
 
 # --- Auth helper ---
-AUTH_TOKEN = get_settings().webhook_auth_token  # Secret key for webhook protection
-
-
 def validate_webhook_authorization(request: Request) -> bool:
-    """Verify webhook authorization header against global secret."""
-    auth_header = request.headers.get("Authorization", "")
-    if not auth_header.startswith("Bearer "):
+    """Verify webhook authorization via Header (Bearer token) or Query Param (token/secret)."""
+    settings = get_settings()
+    auth_token = settings.webhook_auth_token
+    if not auth_token:
+        logger.warning("WEBHOOK_AUTH_TOKEN is not configured")
+        client_host = request.client.host if request.client else None
+        if client_host in {"127.0.0.1", "::1", "localhost", None}:
+            return True
         return False
-    provided_token = auth_header[7:]
-    return provided_token == AUTH_TOKEN
+
+    # 1. Header verification
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        if auth_header[7:].strip() == auth_token:
+            return True
+
+    # 2. Query parameter verification (for Fonnte / gateways without custom headers)
+    token_param = (
+        request.query_params.get("token")
+        or request.query_params.get("secret")
+        or ""
+    )
+    if token_param.strip() == auth_token:
+        return True
+
+    return False
 
 
 # --- Endpoint decorators for tenant extraction ---
@@ -160,11 +183,9 @@ async def whatsapp_webhook(request: Request):
     Requires Bearer token authentication (global webhook secret).
     Tenant ID comes from X-Tenant-ID header (or 'tenant_id' field in payload).
     """
-    # 1. Validate webhook authorization (SKIP in dev mode - remove this comment when ready for prod)
-    # Authorization skipped (Fonnte free doesn't support custom headers)
-    # if not validate_webhook_authorization(request):
-    #     raise HTTPException(status_code=401, detail="Invalid or missing webhook token")
-    #     raise HTTPException(status_code=401, detail="Invalid or missing webhook token")
+    # 1. Validate webhook authorization
+    if not validate_webhook_authorization(request):
+        raise HTTPException(status_code=401, detail="Invalid or missing webhook token")
 
     # 2. Parse JSON payload
     try:
@@ -375,16 +396,24 @@ async def health_check():
         "tenant_count": len(_cached_clients),
         "database": "sqlite" if getattr(settings, "db_path", None) else "not configured",
         "sheets_spreadsheet_id": settings.google_sheets_spreadsheet_id or "unset",
-        "webhook_auth_set": bool(AUTH_TOKEN) and AUTH_TOKEN != "",
+        "webhook_auth_set": bool(settings.webhook_auth_token) and settings.webhook_auth_token != "",
     }
 
 
 # Helper for tests / dev — reset cached tenants and compiled graph so injected mocks take effect.
-# Loopback-only: not exposed to network callers.
+# Loopback-only: protected endpoint for test suite/dev reset.
 @app.post("/debug/reset-all/")
 async def debug_reset_all(request: Request):
+    settings = get_settings()
+    auth_header = request.headers.get("Authorization", "")
+    is_admin = bool(
+        settings.webhook_auth_token
+        and auth_header.startswith("Bearer ")
+        and auth_header[7:].strip() == settings.webhook_auth_token
+    )
     client_host = request.client.host if request.client else None
-    if client_host not in {"127.0.0.1", "::1", "localhost", None}:
+    is_local = client_host in {"127.0.0.1", "::1", "localhost"}
+    if not is_admin and not is_local:
         raise HTTPException(status_code=403, detail="Forbidden")
     reset_compiled_graph_for_testing()
     global _cached_clients, _checkpointer, _compiled_graph
@@ -524,16 +553,34 @@ app.mount('/static', StaticFiles(directory=os.path.join(os.path.dirname(__file__
 app.mount('/media', StaticFiles(directory=os.path.join(os.path.dirname(__file__), '..', 'data', 'media')), name='media')
 
 
+def _resolve_tenant_id_for_user(request: Request, requested_tenant_id: str = "") -> str:
+    """Resolve and enforce tenant access for a logged in user."""
+    user = current_user(request)
+    if user.tenant_id:
+        if requested_tenant_id and requested_tenant_id != user.tenant_id:
+            raise HTTPException(status_code=403, detail="Akses tenant lain ditolak.")
+        return user.tenant_id
+    if requested_tenant_id:
+        return requested_tenant_id
+    raise HTTPException(status_code=400, detail="Akun belum memiliki tenant.")
+
+
 @app.get('/api/tenants')
-async def list_tenants_endpoint():
-    """List only tenants with real data (no fake sheets)."""
+async def list_tenants_endpoint(request: Request):
+    """List tenants accessible to the logged in user."""
+    user = current_user(request)
     tenants = get_real_tenants()
+    if user.tenant_id:
+        tenants = [t for t in tenants if t.get("tenant_id") == user.tenant_id]
     return {'tenants': tenants}
 
 
 @app.delete('/api/tenants/{tenant_id}')
-async def delete_tenant_endpoint(tenant_id: str):
-    """Delete a tenant by ID."""
+async def delete_tenant_endpoint(tenant_id: str, request: Request):
+    """Delete a tenant by ID (must own the tenant)."""
+    user = current_user(request)
+    if user.tenant_id != tenant_id:
+        raise HTTPException(status_code=403, detail="Hanya dapat menghapus tenant milik Anda sendiri.")
     from app.db.tenant_repo import delete_tenant
     if delete_tenant(tenant_id):
         return {'status': 'deleted', 'tenant_id': tenant_id}
@@ -541,20 +588,18 @@ async def delete_tenant_endpoint(tenant_id: str):
 
 
 @app.get('/api/dashboard')
-async def dashboard_data_endpoint(tenant_id: str = ""):
-    """Merchant dashboard data: real orders + chat stats when available,
-    realistic demo fallback otherwise. Serves /dashboard UI."""
+async def dashboard_data_endpoint(request: Request, tenant_id: str = ""):
+    """Merchant dashboard data for logged-in merchant."""
     from datetime import timedelta
-
     from app.db.order_repo import list_orders
     from app.db.tenant_repo import get_tenant
 
-    tenant = get_tenant(tenant_id) if tenant_id else None
+    effective_tenant_id = _resolve_tenant_id_for_user(request, tenant_id)
+    tenant = get_tenant(effective_tenant_id)
     store_name = (tenant.get("intended_merchant_name") or tenant.get("tenant_id") or "Warung Kopi Nusantara") if tenant else "Warung Kopi Nusantara"
 
-    # Real orders for this tenant (or all when no tenant chosen).
     try:
-        orders = list_orders(tenant_id=tenant_id if tenant_id else None, limit=5)
+        orders = list_orders(tenant_id=effective_tenant_id, limit=5)
     except Exception:
         orders = []
 
@@ -563,7 +608,6 @@ async def dashboard_data_endpoint(tenant_id: str = ""):
     total_today = round(sum((o.get("total") or 0) for o in today_orders), 2)
     pending = [o for o in orders if o.get("status") == "pending"]
 
-    # Build a demo+real blended payload shaped like static/dashboard.html expects.
     payload = {
         "storeName": store_name,
         "kpi": {
@@ -589,12 +633,11 @@ async def dashboard_data_endpoint(tenant_id: str = ""):
 
 
 @app.get('/api/dashboard/conversations')
-async def dashboard_conversations_endpoint(tenant_id: str = ""):
-    """Merchant view: recent conversations (one per thread) with last message."""
+async def dashboard_conversations_endpoint(request: Request, tenant_id: str = ""):
+    """Merchant view: recent conversations for authenticated tenant."""
     from app.db.chat_log_repo import list_threads
-    from app.db.tenant_repo import get_real_tenants
 
-    tenant = (tenant_id or (get_real_tenants()[0]["tenant_id"] if get_real_tenants() else ""))
+    tenant = _resolve_tenant_id_for_user(request, tenant_id)
     try:
         threads = list_threads(tenant, limit=30)
     except Exception:
@@ -603,12 +646,11 @@ async def dashboard_conversations_endpoint(tenant_id: str = ""):
 
 
 @app.get('/api/dashboard/conversations/{thread_id}')
-async def dashboard_conversation_detail_endpoint(thread_id: str, tenant_id: str = ""):
-    """Merchant view: full message history for one thread."""
+async def dashboard_conversation_detail_endpoint(thread_id: str, request: Request, tenant_id: str = ""):
+    """Merchant view: full message history for authenticated tenant's thread."""
     from app.db.chat_log_repo import list_chat_logs
-    from app.db.tenant_repo import get_real_tenants
 
-    tenant = (tenant_id or (get_real_tenants()[0]["tenant_id"] if get_real_tenants() else ""))
+    tenant = _resolve_tenant_id_for_user(request, tenant_id)
     try:
         logs = list_chat_logs(tenant, thread_id=thread_id, limit=50)
     except Exception:
@@ -617,21 +659,17 @@ async def dashboard_conversation_detail_endpoint(thread_id: str, tenant_id: str 
 
 
 @app.get('/api/dashboard/catalog')
-async def dashboard_catalog_endpoint(tenant_id: str = ""):
-    """Merchant view: product catalog read from their Google Sheet (graceful fallback).
-
-    The Google Sheets call can block on the network, so it runs in a worker
-    thread with a hard timeout — a slow sheet must never stall the dashboard.
-    """
+async def dashboard_catalog_endpoint(request: Request, tenant_id: str = ""):
+    """Merchant view: product catalog for authenticated tenant."""
     import concurrent.futures
     from app.config import get_settings
-    from app.db.tenant_repo import get_real_tenants, get_tenant
+    from app.db.tenant_repo import get_tenant
 
-    tenant = (tenant_id or (get_real_tenants()[0]["tenant_id"] if get_real_tenants() else ""))
-    record = get_tenant(tenant) if tenant else None
+    tenant = _resolve_tenant_id_for_user(request, tenant_id)
+    record = get_tenant(tenant)
 
     def _read():
-        if record is None:
+        if record is None or not record.get("google_sheet_id"):
             return []
         from app.services.sheets import GoogleSheetsClient
 
@@ -653,11 +691,11 @@ async def dashboard_catalog_endpoint(tenant_id: str = ""):
 
 
 @app.get('/api/dashboard/settings')
-async def dashboard_settings_endpoint(tenant_id: str = ""):
-    """Merchant view: store settings + bot readiness."""
-    from app.db.tenant_repo import get_real_tenants, get_tenant
+async def dashboard_settings_endpoint(request: Request, tenant_id: str = ""):
+    """Merchant view: store settings + bot readiness for authenticated tenant."""
+    from app.db.tenant_repo import get_tenant
 
-    tenant = (tenant_id or (get_real_tenants()[0]["tenant_id"] if get_real_tenants() else ""))
+    tenant = _resolve_tenant_id_for_user(request, tenant_id)
     record = get_tenant(tenant)
     if record is None:
         return {"tenant_id": tenant, "settings": {}}

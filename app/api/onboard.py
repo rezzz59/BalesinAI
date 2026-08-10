@@ -25,7 +25,7 @@ from app.db.tenant_repo import (
     update_onboarding_status,
     update_tier,
 )
-from app.services.crypto import encrypt_api_key
+from app.services.crypto import decrypt_api_key, encrypt_api_key
 from app.services.embedding_seeder import seed_local_tenant_embeddings
 from app.services.xlsx_parser import XlsxParseError, parse_workbook
 
@@ -35,6 +35,22 @@ router = APIRouter(prefix="/api/onboard", tags=["onboard"])
 
 MEDIA_ROOT = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data", "media")
 ALLOWED_IMG = {".png", ".jpg", ".jpeg", ".webp"}
+
+
+def _validate_wa_number(num: str) -> str:
+    """Normalize + validate an Indonesian WhatsApp number.
+
+    Accepts 08..., 8..., 628..., +62... and strips punctuation. Returns the
+    62-prefixed digits, or raises HTTPException(400) if clearly invalid.
+    """
+    digits = "".join(ch for ch in (num or "").strip() if ch.isdigit())
+    if digits.startswith("0"):
+        digits = "62" + digits[1:]
+    elif not digits.startswith("62"):
+        digits = "62" + digits
+    if len(digits) < 8 or len(digits) > 16:
+        raise HTTPException(status_code=400, detail="Nomor WhatsApp tidak valid. Gunakan 08xx atau 628xx (9-15 digit).")
+    return digits
 
 
 def _media_dir(tenant_id: str) -> str:
@@ -78,16 +94,19 @@ async def create_my_tenant(request: Request):
 
     tenant_id = user.tenant_id or f"{_slugify(merchant_name)}-{secrets.token_hex(2)}"
 
-    # Encrypt Fonnte key if provided (or reuse any existing key).
+    # Encrypt Fonnte key if the user explicitly provided one; otherwise leave
+    # empty so a fresh QR pairing can mint the real per-device token later.
     from app.config import get_settings
 
     settings = get_settings()
     existing = get_tenant(tenant_id)
     key_to_encrypt = fonnte_api_key or (
-        settings.fonnte_api_key if existing is None else None
+        existing.get("wa_api_key_encrypted") if existing is not None else None
     )
     encrypted: bytes = b""
-    if key_to_encrypt:
+    if isinstance(key_to_encrypt, bytes):
+        encrypted = key_to_encrypt  # keep the already-encrypted token as-is
+    elif key_to_encrypt:
         encrypted = encrypt_api_key(key_to_encrypt, settings.encryption_key)
 
     insert_or_update_tenant(
@@ -114,9 +133,12 @@ async def upload_xlsx(request: Request, file: UploadFile):
     if not file.filename or not file.filename.lower().endswith(".xlsx"):
         raise HTTPException(status_code=400, detail="Unggah file .xlsx.")
 
+    MAX_FILE_SIZE = 5 * 1024 * 1024  # 5 MB
     content = await file.read()
     if not content:
         raise HTTPException(status_code=400, detail="File kosong.")
+    if len(content) > MAX_FILE_SIZE:
+        raise HTTPException(status_code=400, detail="Ukuran file terlalu besar. Maksimal 5MB.")
 
     try:
         parsed = parse_workbook(content)
@@ -125,6 +147,7 @@ async def upload_xlsx(request: Request, file: UploadFile):
 
     faq_count = local_data_repo.replace_faq(tenant["tenant_id"], parsed["faq"])
     catalog_count = local_data_repo.replace_catalog(tenant["tenant_id"], parsed["catalog"])
+    ongkir_count = local_data_repo.replace_ongkir(tenant["tenant_id"], parsed.get("ongkir", []))
 
     # Seed embeddings for semantic search.
     try:
@@ -137,6 +160,7 @@ async def upload_xlsx(request: Request, file: UploadFile):
         "status": "ok",
         "faq_count": faq_count,
         "catalog_count": catalog_count,
+        "ongkir_count": ongkir_count,
     }
 
 
@@ -227,7 +251,7 @@ async def provision_device(request: Request):
     user = current_user(request)
     tenant = _user_tenant(user)
     body = await request.json()
-    device_wa = (body.get("device_wa") or "").strip()
+    device_wa = _validate_wa_number(body.get("device_wa") or "")
     if not device_wa:
         raise HTTPException(status_code=400, detail="Nomor WhatsApp device wajib diisi.")
 
@@ -238,27 +262,55 @@ async def provision_device(request: Request):
 
     from app.services.fonnte import FonnteGateway, FonnteError
 
-    gateway = FonnteGateway(api_key=account_token)
+    # get-qr requires the DEVICE token, not the account token.
     device_token = ""
+    # 1. Reuse the stored per-device token if this device was already paired.
+    if tenant.get("wa_api_key_encrypted"):
+        try:
+            device_token = decrypt_api_key(tenant["wa_api_key_encrypted"], settings.encryption_key)
+        except Exception:  # noqa: BLE001
+            device_token = ""
 
-    # 1. Create the device (returns a per-device token). If it already exists,
-    #    reuse the stored token rather than failing the whole flow.
+    # 2. If we don't have a device token yet, create the device (account token).
+    if not device_token:
+        acct_gateway = FonnteGateway(api_key=account_token)
+        try:
+            dev = await acct_gateway.add_device(name=tenant["tenant_id"][:30], device=device_wa)
+            device_token = dev.get("token", "")
+        except FonnteError as e:
+            if "already exist" not in str(e).lower():
+                raise HTTPException(status_code=502, detail=f"Gagal buat device: {e}")
+
+    # 3. Fetch the pairing QR with the DEVICE token.
+    device_gateway = FonnteGateway(api_key=device_token)
     try:
-        dev = await gateway.add_device(name=tenant["tenant_id"][:30], device=device_wa)
-        device_token = dev.get("token", "")
+        qr = await device_gateway.get_qr(device_wa)
     except FonnteError as e:
-        if "already exist" not in str(e).lower():
-            raise HTTPException(status_code=502, detail=f"Gagal buat device: {e}")
+        # Only "already connect" means the device is actually paired.
+        if "already connect" in str(e).lower():
+            update_device_status(tenant["tenant_id"], "connected")
+            return {"status": "ok", "device": device_wa, "qr": "", "device_status": "connected",
+                    "note": str(e)}
+        # Reused token may be stale (device deleted on the dashboard). Re-mint a
+        # fresh device token via the account token, then retry the QR once.
+        if "token invalid" in str(e).lower() and account_token:
+            acct_gateway = FonnteGateway(api_key=account_token)
+            try:
+                dev = await acct_gateway.add_device(name=tenant["tenant_id"][:30], device=device_wa)
+                fresh_token = dev.get("token", "")
+                if not fresh_token:
+                    raise HTTPException(status_code=502, detail=f"Device belum terhubung: {e}")
+                device_token = fresh_token
+                qr = await FonnteGateway(api_key=device_token).get_qr(device_wa)
+            except FonnteError as de:
+                raise HTTPException(status_code=502, detail=f"Gagal sambungkan device: {de}")
+            except HTTPException:
+                raise
+        else:
+            # Any other error (device not registered) is a real problem.
+            raise HTTPException(status_code=502, detail=f"Gagal ambil QR: {e}")
 
-    # 2. Fetch the pairing QR. Already-connected devices get a clear message.
-    try:
-        qr = await gateway.get_qr(device_wa)
-    except FonnteError as e:
-        update_device_status(tenant["tenant_id"], "connected")
-        return {"status": "ok", "device": device_wa, "qr": "", "device_status": "connected",
-                "note": str(e)}
-
-    # 3. Persist the per-device token + number, mark pairing pending.
+    # 4. Persist the per-device token + number, mark pairing pending.
     if device_token:
         encrypted = encrypt_api_key(device_token, settings.encryption_key)
     else:
@@ -286,12 +338,44 @@ async def provision_device(request: Request):
 
 @router.get("/device/status")
 async def device_status(request: Request):
-    """Return the current device pairing status for the user's tenant."""
+    """Return the current device pairing status for the user's tenant.
+
+    When the device is pending, queries Fonnte's device profile (via the stored
+    device token) to confirm whether it has been paired — and, if so, corrects
+    fonnte_device_id to the REAL WhatsApp number that scanned the QR (the label
+    used at add-device time may differ from the number actually linked).
+    """
     user = current_user(request)
     tenant = _user_tenant(user)
+
+    status = tenant.get("device_status", "fresh")
+    real_number = tenant.get("fonnte_device_id", "")
+
+    if status == "pending":
+        # Verify the REAL connect state from the account (get-devices), which
+        # reports each device's status as connect/disconnect. The label used at
+        # add-device time is intentionally ignored for the connect decision.
+        settings = get_settings()
+        account_token = settings.fonnte_account_token
+        if account_token:
+            try:
+                from app.services.fonnte import FonnteGateway, FonnteError
+
+                res = await FonnteGateway(api_key=account_token).get_devices()
+                for dev in res.get("data", []):
+                    if dev.get("device") == tenant.get("fonnte_device_id"):
+                        if dev.get("status") == "connect":
+                            update_device_status(tenant["tenant_id"], "connected")
+                            status = "connected"
+                        elif dev.get("status") == "disconnect":
+                            status = "disconnect"
+                        break
+            except Exception:  # noqa: BLE001
+                pass  # keep current status; frontend can retry
+
     return {
-        "device": tenant.get("fonnte_device_id", ""),
-        "device_status": tenant.get("device_status", "fresh"),
+        "device": real_number,
+        "device_status": status,
         "tier": tenant.get("tier", "basic"),
         "gateway_plan": tenant.get("gateway_plan", "lite"),
     }

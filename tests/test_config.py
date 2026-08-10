@@ -22,6 +22,7 @@ def test_settings_loads_required_fields(monkeypatch):
     monkeypatch.setenv("ENCRYPTION_KEY", "dGVzdC1rZXktMTIzNDU2Nzg5MGFiY2RlZg==")
     monkeypatch.setenv("FONNTE_API_KEY", "test-fonnte-token")
     monkeypatch.setenv("GOOGLE_SHEETS_CREDENTIALS_JSON_PATH", "./secrets/test.json")
+    monkeypatch.setenv("LLM_BACKEND", "gemini")
 
     get_settings.cache_clear()  # type: ignore[attr-defined]
     settings = Settings()

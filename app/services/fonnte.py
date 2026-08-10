@@ -63,6 +63,24 @@ class FonnteGateway(PhoneGateway):
         payload = {"target": target.lstrip("+"), "countryCode": "62", "duration": duration, "stop": str(stop).lower()}
         return await self._post("/typing", payload)
 
+    async def device_profile(self) -> dict[str, Any]:
+        """Return the actual device number + status for the current token.
+
+        Uses the DEVICE token. 'device' in the response is the REAL WhatsApp
+        number linked to the device (what the user scanned), not the label used
+        at add-device time.
+        """
+        return await self._post("/device", {})
+
+    async def get_devices(self) -> dict[str, Any]:
+        """List all devices on the account (ACCOUNT token).
+
+        Returns {'devices': int, 'connected': int, 'data': [...]}. Each item's
+        'status' is 'connect'/'disconnect' — the real link state of the device,
+        usable to validate that a QR scan actually connected.
+        """
+        return await self._post("/get-devices", {})
+
     async def send_message(
         self,
         phone: str,
