@@ -965,8 +965,8 @@ def _format_order_confirmation(
     ref = f" ({order_code})" if order_code else ""
     if not items:
         return (
-            f"Noted Kak 🙏 Order kamu tercatat{ref}. Sebelum lanjut, boleh sebutkan "
-            f"produk & jumlahnya ya, Kak? Contoh: 'kaos hitam 2 pcs' 😊"
+            f"Noted Kak 🙏 Order kamu tercatat{ref}. Contoh penulisannya: 'kaos hitam 2 pcs'. "
+            f"Nah, produk & jumlahnya mau berapa ya, Kak? 😊"
         )
     lines = [f"Order diterima{ref}! 🎉", ""]
     for it in items:
