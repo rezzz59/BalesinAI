@@ -211,10 +211,8 @@ def test_get_fallback_llm_client_with_valid_backends(monkeypatch):
     from app.config import get_settings
 
     s = get_settings()
-    if not s.adacode_api_key:
-        monkeypatch.setenv("ADACODE_API_KEY", "test-adacode-key")
-    if not s.gemini_api_key:
-        monkeypatch.setenv("GEMINI_API_KEY", "test-gemini-key")
+    monkeypatch.setattr(s, "adacode_api_key", s.adacode_api_key or "test-adacode-key")
+    monkeypatch.setattr(s, "gemini_api_key", s.gemini_api_key or "test-gemini-key")
 
     chain = get_fallback_llm_client(["adacode", "gemini"])
     assert isinstance(chain, FallingBackLLMClient)

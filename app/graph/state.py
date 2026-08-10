@@ -21,6 +21,7 @@ class ChatState(TypedDict, total=False):
     intent: Intent
     confidence: float
     has_complaint_signal: bool
+    has_objection_signal: bool
     sentiment: Literal["positive", "neutral", "negative"]
 
     # Lookup output

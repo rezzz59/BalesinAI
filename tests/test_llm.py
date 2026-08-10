@@ -70,6 +70,30 @@ def test_classify_defaults_complaint_signal_false():
         result = client.classify("Berapa harga kaos?")
 
         assert result["has_complaint_signal"] is False
+        assert result["has_objection_signal"] is False
+
+
+def test_classify_parses_has_objection_signal():
+    """Classification JSON must carry has_objection_signal into the result."""
+    text = json.dumps({
+        "intent": "faq",
+        "confidence": 0.8,
+        "has_complaint_signal": False,
+        "has_objection_signal": True,
+        "sentiment": "negative",
+    })
+    mock_response = MagicMock()
+    mock_response.content = [MagicMock(type="text", text=text)]
+
+    with patch("anthropic.Anthropic") as mock_cls:
+        mock_client = MagicMock()
+        mock_client.messages.create.return_value = mock_response
+        mock_cls.return_value = mock_client
+
+        client = AnthropicLLMClient(api_key="test-key")
+        result = client.classify("hmm mahal juga ya, ada diskon ga?")
+
+        assert result["has_objection_signal"] is True
 
 
 def test_classify_handles_invalid_json():

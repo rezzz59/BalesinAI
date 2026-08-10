@@ -49,7 +49,7 @@ def should_fallback(state: ChatState, threshold: float | None = None) -> bool:
     if threshold is None:
         threshold = get_settings().intent_confidence_threshold
 
-    if state.get("has_complaint_signal"):
+    if state.get("has_complaint_signal") or state.get("has_objection_signal"):
         return True
     if state.get("intent") == "unclear":
         return True

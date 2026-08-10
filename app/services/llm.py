@@ -121,16 +121,19 @@ class MockLLMClient(LLMClient):
         has_complaint_signal = any(
             kw in msg
             for kw in ("kecewa", "rusak", "refund", "balik", "gak sampai", "belum sampai",
-                       "udah lama", "kapan sampainya", "komplain", "jelek", "batal")
+                       "udah lama", "komplain", "jelek", "batal")
         )
-        sentiment = "negative" if has_complaint_signal else "neutral"
+        has_objection_signal = any(
+            kw in msg for kw in ("mahal", "diskon", "potongan", "negosiasi", "nggak kebeli")
+        )
+        sentiment = "negative" if (has_complaint_signal or has_objection_signal) else "neutral"
         if any(kw in msg for kw in ("stok", "ready", "ada ga", "ada nggak", "ready stock", "tersedia")):
-            return {"intent": "check_product", "confidence": 0.95, "has_complaint_signal": has_complaint_signal, "sentiment": sentiment}
+            return {"intent": "check_product", "confidence": 0.95, "has_complaint_signal": has_complaint_signal, "has_objection_signal": has_objection_signal, "sentiment": sentiment}
         if any(kw in msg for kw in ("order", "pesan", "beli", "booking", "checkout")):
-            return {"intent": "confirm_order", "confidence": 0.92, "has_complaint_signal": has_complaint_signal, "sentiment": sentiment}
+            return {"intent": "confirm_order", "confidence": 0.92, "has_complaint_signal": has_complaint_signal, "has_objection_signal": has_objection_signal, "sentiment": sentiment}
         if any(kw in msg for kw in ("?", "apa", "bagaimana", "kapan", "dimana", "gimana")):
-            return {"intent": "faq", "confidence": 0.8, "has_complaint_signal": has_complaint_signal, "sentiment": sentiment}
-        return {"intent": "unclear", "confidence": 0.4, "has_complaint_signal": has_complaint_signal, "sentiment": sentiment}
+            return {"intent": "faq", "confidence": 0.8, "has_complaint_signal": has_complaint_signal, "has_objection_signal": has_objection_signal, "sentiment": sentiment}
+        return {"intent": "unclear", "confidence": 0.4, "has_complaint_signal": has_complaint_signal, "has_objection_signal": has_objection_signal, "sentiment": sentiment}
 
     def classify_with_history(self, messages: list[dict[str, str]]) -> ClassificationResult:
         """Multi-turn aware classification using latest message only."""
@@ -272,13 +275,14 @@ class AdaCodeLLMClient(LLMClient):
             confidence = float(data.get("confidence", 0))
             sentiment = data.get("sentiment", "neutral").lower()
             complaint = bool(data.get("has_complaint_signal", False))
+            objection = bool(data.get("has_objection_signal", False))
             if intent not in VALID_INTENTS:
                 raise LLMValidationError(f"Invalid intent from AdaCode: {intent!r}")
             if not (0 <= confidence <= 1):
                 raise LLMValidationError(f"Confidence out of range: {confidence}")
             if sentiment not in VALID_SENTIMENTS:
                 sentiment = "neutral"
-            return {"intent": intent, "confidence": confidence, "has_complaint_signal": complaint, "sentiment": sentiment}
+            return {"intent": intent, "confidence": confidence, "has_complaint_signal": complaint, "has_objection_signal": objection, "sentiment": sentiment}
         except (json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
             raise LLMValidationError(f"Failed to parse AdaCode classification: {e}") from e
 
@@ -401,13 +405,14 @@ class GeminiLLMClient(LLMClient):
             confidence = float(data.get("confidence", 0))
             sentiment = data.get("sentiment", "neutral").lower()
             complaint = bool(data.get("has_complaint_signal", False))
+            objection = bool(data.get("has_objection_signal", False))
             if intent not in VALID_INTENTS:
                 raise LLMValidationError(f"Invalid intent: {intent!r}")
             if not (0 <= confidence <= 1):
                 raise LLMValidationError(f"Confidence out of range: {confidence}")
             if sentiment not in VALID_SENTIMENTS:
                 sentiment = "neutral"
-            return {"intent": intent, "confidence": confidence, "has_complaint_signal": complaint, "sentiment": sentiment}
+            return {"intent": intent, "confidence": confidence, "has_complaint_signal": complaint, "has_objection_signal": objection, "sentiment": sentiment}
         except (json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
             raise LLMValidationError(f"Failed to parse classification: {e}") from e
 
@@ -542,13 +547,14 @@ class AnthropicLLMClient(LLMClient):
             confidence = float(data.get("confidence", 0))
             sentiment = data.get("sentiment", "neutral").lower()
             complaint = bool(data.get("has_complaint_signal", False))
+            objection = bool(data.get("has_objection_signal", False))
             if intent not in VALID_INTENTS:
                 raise LLMValidationError(f"Invalid intent: {intent!r}")
             if not (0 <= confidence <= 1):
                 raise LLMValidationError(f"Confidence out of range: {confidence}")
             if sentiment not in VALID_SENTIMENTS:
                 sentiment = "neutral"
-            return {"intent": intent, "confidence": confidence, "has_complaint_signal": complaint, "sentiment": sentiment}
+            return {"intent": intent, "confidence": confidence, "has_complaint_signal": complaint, "has_objection_signal": objection, "sentiment": sentiment}
         except (json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
             raise LLMValidationError(f"Failed to parse classification: {e}") from e
 

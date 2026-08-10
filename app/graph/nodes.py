@@ -83,10 +83,11 @@ def fallback_reason_for(state: ChatState, threshold: float | None = None) -> str
 
     Priority order:
       1. complaint_signal — buyer escalation/escalation risk
-      2. unclear — intent not classifiable
-      3. low_confidence — below intent_confidence_threshold
-      4. no_faq_match — FAQ lookup returned nothing (intent=faq)
-      5. no_product_match — product lookup returned nothing (intent=check_product)
+      2. objection_signal — buyer hesitation on price/cost
+      3. unclear — intent not classifiable
+      4. low_confidence — below intent_confidence_threshold
+      5. no_faq_match — FAQ lookup returned nothing (intent=faq)
+      6. no_product_match — product lookup returned nothing (intent=check_product)
 
     Only one reason per call. Higher-priority reason wins.
     """
@@ -97,6 +98,8 @@ def fallback_reason_for(state: ChatState, threshold: float | None = None) -> str
 
     if state.get("has_complaint_signal"):
         return "complaint_signal"
+    if state.get("has_objection_signal"):
+        return "objection_signal"
     if state.get("intent") == "unclear":
         return "unclear"
     if state.get("confidence", 0.0) < threshold:
@@ -139,6 +142,7 @@ def classify_intent(state: ChatState, llm_client: Any) -> dict:
             "intent": "unclear",
             "confidence": 1.0,  # confident it's unclear
             "has_complaint_signal": False,
+            "has_objection_signal": False,
             "sentiment": "neutral",
         }
 
@@ -160,6 +164,7 @@ def classify_intent(state: ChatState, llm_client: Any) -> dict:
                 "intent": result["intent"],
                 "confidence": result["confidence"],
                 "has_complaint_signal": result.get("has_complaint_signal", False),
+                "has_objection_signal": result.get("has_objection_signal", False),
                 "history_turns": len(messages),
             },
         )
@@ -167,6 +172,7 @@ def classify_intent(state: ChatState, llm_client: Any) -> dict:
             "intent": result["intent"],
             "confidence": result["confidence"],
             "has_complaint_signal": result.get("has_complaint_signal", False),
+            "has_objection_signal": result.get("has_objection_signal", False),
             "sentiment": result.get("sentiment", "neutral"),
         }
     except LLMError as e:
@@ -708,6 +714,7 @@ def _compose_owner_fallback_message(state: ChatState, fallback_reason: str, sent
         "unclear": "pesannya tidak masuk kategori pertanyaan biasa, jadi bot menyerahkannya ke Anda",
         "low_confidence": "bot tidak yakin memahami maksudnya, jadi lebih aman diserahkan ke Anda",
         "complaint_signal": "pelanggan tampak tidak senang/kecewa, sebaiknya segera Anda tangani",
+        "objection_signal": "pelanggan ragu pada harga/biaya, sebaiknya Anda bantu pertimbangkan",
         "no_faq_match": "pertanyaannya belum ada di data jawaban yang tersedia",
         "no_product_match": "produk yang ditanyakan tidak ditemukan di katalog",
     }.get(fallback_reason, "bot belum bisa menjawabnya secara otomatis")
@@ -784,6 +791,11 @@ async def fallback_human(state: ChatState, gateway_client: Any) -> dict:
             buyer_ack = (
                 "Mohon maaf ya Kak atas ketidaknyamanannya 🙏 Kami cek dulu ke tim. "
                 "Boleh dibantu, solusi seperti apa yang Kakak harapkan?"
+            )
+        elif state.get("has_objection_signal"):
+            buyer_ack = (
+                "Baik Kak, kami bantu pertimbangkan dulu ya 🙏 Boleh kami tahu, kira-kira "
+                "budget Kakak di angka berapa? Nanti kami carikan opsi yang paling pas."
             )
         else:
             buyer_ack = (
