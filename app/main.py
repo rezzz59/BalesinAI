@@ -365,6 +365,9 @@ async def whatsapp_webhook(request: Request):
         # On order confirmation, clear the draft so it doesn't leak into a new order.
         if result.get("action") == "order" and result.get("order_code"):
             memory.pop("order_draft", None)
+        # Buyer replied → restart the anti-ghosting follow-up cycle from scratch.
+        if prior.get("followup_touchpoint"):
+            memory["followup_touchpoint"] = 0
         if memory:
             save_conversation_state(tenant_id, thread_id, memory)
 
