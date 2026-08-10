@@ -2,7 +2,7 @@
 import logging
 
 from app.db.engine import get_session
-from app.db.models import CatalogRow, FaqRow
+from app.db.models import CatalogRow, FaqRow, OngkirRow
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +38,27 @@ def replace_catalog(tenant_id: str, rows: list[dict]) -> int:
                 harga=str(r.get("harga") or "").strip(),
                 ready=str(r.get("ready") or "").strip(),
                 deskripsi=str(r.get("deskripsi") or "").strip(),
+                min_order=str(r.get("min_order") or "").strip(),
+            ))
+            added += 1
+        session.commit()
+        return added
+
+
+def replace_ongkir(tenant_id: str, rows: list[dict]) -> int:
+    """Replace all ongkir rows for a tenant. rows: [{wilayah, ongkir, min_order}]."""
+    with get_session() as session:
+        session.query(OngkirRow).filter_by(tenant_id=tenant_id).delete()
+        added = 0
+        for r in rows:
+            wilayah = (r.get("wilayah") or "").strip()
+            if not wilayah:
+                continue
+            session.add(OngkirRow(
+                tenant_id=tenant_id,
+                wilayah=wilayah,
+                ongkir=str(r.get("ongkir") or "").strip(),
+                min_order=str(r.get("min_order") or "").strip(),
             ))
             added += 1
         session.commit()
@@ -59,7 +80,17 @@ def session_catalog(tenant_id: str) -> list[dict]:
                 "harga": r.harga,
                 "ready": r.ready,
                 "deskripsi": r.deskripsi,
+                "min_order": r.min_order,
             }
+            for r in rows
+        ]
+
+
+def session_ongkir(tenant_id: str) -> list[dict]:
+    with get_session() as session:
+        rows = session.query(OngkirRow).filter_by(tenant_id=tenant_id).all()
+        return [
+            {"wilayah": r.wilayah, "ongkir": r.ongkir, "min_order": r.min_order}
             for r in rows
         ]
 

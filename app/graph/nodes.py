@@ -823,6 +823,7 @@ async def capture_order(
     total: float | None = None
     order_id: int | None = None
     order_code: str | None = None
+    catering_meta: dict | None = None
 
     try:
         catalog = sheets_client.read_catalog() if persist_orders or True else []
@@ -830,6 +831,21 @@ async def capture_order(
         items = merge_items(draft, new_items) if new_items else draft
         buyer_name, buyer_address = extract_buyer_info(message)
         total = compute_total(items)
+
+        # Catering: add ongkir + DP + min-order + event-date rules.
+        from app.db.tenant_repo import get_tenant as _get_tenant
+
+        _tenant = _get_tenant(tenant_id)
+        if _tenant and (_tenant.get("business_type") == "kuliner"):
+            from app.services.business_rules import catering_quote
+
+            ongkir_rows = []
+            try:
+                ongkir_rows = sheets_client.read_ongkir()
+            except Exception:  # noqa: BLE001
+                ongkir_rows = []
+            catering_meta = catering_quote(items, ongkir_rows, message)
+            total = catering_meta["total"]
     except Exception as e:  # noqa: BLE001
         logger.error(
             "order_extraction_failed",
@@ -838,7 +854,10 @@ async def capture_order(
         items, buyer_name, buyer_address, total = [], None, None, None
 
     # Persist (best-effort) when enabled. Dry-run (test-chat) skips writes.
-    if persist_orders:
+    # Catering orders without an event date are NOT persisted — the quote is a
+    # preview until the kitchen schedule is confirmed.
+    _catering_incomplete = bool(catering_meta and catering_meta.get("needs_date"))
+    if persist_orders and not _catering_incomplete:
         try:
             from app.db.order_repo import insert_order
 
@@ -864,7 +883,7 @@ async def capture_order(
 
     # Owner notification (best-effort, only when persisting real orders).
     # Skipped when the target is the bot's own device (self-notify guard).
-    if persist_orders:
+    if persist_orders and not _catering_incomplete:
         try:
             from app.db.tenant_repo import get_tenant
 
@@ -880,9 +899,14 @@ async def capture_order(
         except Exception as e:  # noqa: BLE001
             logger.error("order_owner_notify_failed", extra={"tenant_id": tenant_id, "error": str(e)})
 
-    reply = _format_order_confirmation(
-        message, items, total, buyer_name, buyer_address, order_code
-    )
+    if catering_meta:
+        from app.services.business_rules import format_catering_reply
+
+        reply = format_catering_reply(catering_meta, items)
+    else:
+        reply = _format_order_confirmation(
+            message, items, total, buyer_name, buyer_address, order_code
+        )
     return {
         "reply_text": reply,
         "action": "order",
@@ -891,6 +915,7 @@ async def capture_order(
         "order_items": items,
         "order_total": total,
         "order_draft": items,
+        "catering_meta": catering_meta,
     }
 
 

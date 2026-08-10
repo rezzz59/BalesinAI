@@ -51,3 +51,6 @@ class ChatState(TypedDict, total=False):
     # Order draft state (multi-turn order refinement)
     order_draft: list[dict] | None  # Draft items being built up: [{product, qty, price}]
     last_mentioned_product: str | None  # Product name from last check_product intent
+
+    # Catering business rules (kuliner): ongkir/DP/min-order/event-date quote
+    catering_meta: dict | None

@@ -9,7 +9,7 @@ import logging
 
 from openpyxl import load_workbook
 
-from app.services.sheets import CATALOG_COL_MAP, FAQ_COL_MAP, _normalize_header
+from app.services.sheets import CATALOG_COL_MAP, FAQ_COL_MAP, ONGKIR_COL_MAP, _normalize_header
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +64,7 @@ def parse_workbook(content: bytes) -> dict:
 
     faq_rows: list[dict] = []
     catalog_rows: list[dict] = []
+    ongkir_rows: list[dict] = []
 
     for ws in wb.worksheets:
         it = ws.iter_rows(values_only=True)
@@ -83,6 +84,7 @@ def parse_workbook(content: bytes) -> dict:
 
         faq_cols = _match_column(header, FAQ_COL_MAP)
         cat_cols = _match_column(header, CATALOG_COL_MAP)
+        ongkir_cols = _match_column(header, ONGKIR_COL_MAP)
 
         def pick(row, col_idx: int):
             if col_idx is None or col_idx >= len(row):
@@ -106,12 +108,24 @@ def parse_workbook(content: bytes) -> dict:
                     "harga": pick(row, cat_cols["harga"]) if "harga" in cat_cols else "",
                     "ready": pick(row, cat_cols["ready"]) if "ready" in cat_cols else "",
                     "deskripsi": pick(row, cat_cols["deskripsi"]) if "deskripsi" in cat_cols else "",
+                    "min_order": pick(row, cat_cols["min_order"]) if "min_order" in cat_cols else "",
+                })
+
+        if "wilayah" in ongkir_cols and "ongkir" in ongkir_cols:
+            for row in body:
+                wilayah = pick(row, ongkir_cols["wilayah"]).strip()
+                if not wilayah:
+                    continue
+                ongkir_rows.append({
+                    "wilayah": wilayah,
+                    "ongkir": pick(row, ongkir_cols["ongkir"]).strip(),
+                    "min_order": pick(row, ongkir_cols["min_order"]) if "min_order" in ongkir_cols else "",
                 })
 
     wb.close()
-    if not faq_rows and not catalog_rows:
+    if not faq_rows and not catalog_rows and not ongkir_rows:
         raise XlsxParseError(
-            "Tidak ada data FAQ (kolom pertanyaan/jawaban) atau katalog "
-            "(kolom nama produk) yang dikenali di file ini."
+            "Tidak ada data FAQ (kolom pertanyaan/jawaban), katalog "
+            "(kolom nama produk), atau ongkir (kolom wilayah/ongkir) yang dikenali di file ini."
         )
-    return {"faq": faq_rows, "catalog": catalog_rows}
+    return {"faq": faq_rows, "catalog": catalog_rows, "ongkir": ongkir_rows}

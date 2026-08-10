@@ -25,6 +25,9 @@ class LocalDataClient:
     def read_catalog(self) -> list[dict]:
         return local_data_repo.session_catalog(self.tenant_id)
 
+    def read_ongkir(self) -> list[dict]:
+        return local_data_repo.session_ongkir(self.tenant_id)
+
     def list_ready_products(self) -> list[dict]:
         return [
             r for r in self.read_catalog()

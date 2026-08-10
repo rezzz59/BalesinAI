@@ -49,9 +49,9 @@ FAQ_MATCH_THRESHOLD = 0.3
 # intended tab type from tab-name keywords first, then from header keywords.
 FAQ_TAB_KEYWORDS = ("faq", "pertanyaan", "qna", "tanya", "question")
 CATALOG_TAB_KEYWORDS = (
-    "katalog", "produk", "product", "catalog", "catalogue",
-    "barang", "item", "menu",
+    "katalog", "catalog", "produk", "product", "menu", "barang", "item", "daftar harga",
 )
+ONGKIR_TAB_KEYWORDS = ("ongkir", "tarif", "pengiriman", "shipping", "biaya kirim")
 
 # Canonical column name -> accepted aliases (normalized: lowercase, stripped of
 # non-alphanumeric). Used to map a merchant's spreadsheet onto the internal
@@ -65,6 +65,13 @@ CATALOG_COL_MAP = {
     "harga": ["harga", "price", "hrg", "harga jual"],
     "ready": ["ready", "stok", "stock", "status", "tersedia", "ketersediaan", "stockstatus"],
     "deskripsi": ["deskripsi", "desc", "description", "detail", "keterangan", "kategori"],
+    "min_order": ["min_order", "minimal", "minimal_order", "min_porsi", "minimal_porsi", "minimum"],
+}
+# Columns for the optional "Ongkir" (shipping cost) tab.
+ONGKIR_COL_MAP = {
+    "wilayah": ["wilayah", "area", "lokasi", "kecamatan", "daerah", "tujuan"],
+    "ongkir": ["ongkir", "harga", "biaya", "tarif", "cost", "harga_ongkir"],
+    "min_order": ["min_order", "minimal", "minimal_order", "min_porsi", "minimum"],
 }
 
 # Values treated as "in stock" for the 'ready' column across merchant sheets.
@@ -129,7 +136,7 @@ def _normalize_header(h: str) -> str:
 
 
 def _infer_tab_type(title: str, headers: list[str]) -> str:
-    """Infer whether a tab is FAQ, catalog, or unknown.
+    """Infer whether a tab is FAQ, catalog, ongkir, or unknown.
 
     Tab-name keywords win (strong signal, e.g. 'FAQ'), then header keywords.
     """
@@ -140,6 +147,9 @@ def _infer_tab_type(title: str, headers: list[str]) -> str:
     for kw in CATALOG_TAB_KEYWORDS:
         if kw in t:
             return "catalog"
+    for kw in ONGKIR_TAB_KEYWORDS:
+        if kw in t:
+            return "ongkir"
 
     norm_headers = {_normalize_header(h) for h in headers}
     faq_cols = {_normalize_header(a) for aliases in FAQ_COL_MAP.values() for a in aliases}
@@ -311,6 +321,21 @@ class GoogleSheetsClient:
         tab = self.find_tab("catalog") or "Katalog"
         return [
             self._canonicalize_row(r, CATALOG_COL_MAP)
+            for r in self._read_tab(tab)
+        ]
+
+    def read_ongkir(self) -> list[dict[str, str]]:
+        """Read the optional 'Ongkir' tab (shipping cost per wilayah/kecamatan).
+
+        Returns [{wilayah, ongkir, min_order}] canonicalized via ONGKIR_COL_MAP,
+        or [] when no ongkir tab exists. Used by catering rules to add shipping
+        cost + area minimums to a quote.
+        """
+        tab = self.find_tab("ongkir")
+        if tab is None:
+            return []
+        return [
+            self._canonicalize_row(r, ONGKIR_COL_MAP)
             for r in self._read_tab(tab)
         ]
 

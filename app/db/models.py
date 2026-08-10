@@ -93,6 +93,20 @@ class CatalogRow(Base):
     harga: Mapped[str] = mapped_column(String, nullable=False, default="")
     ready: Mapped[str] = mapped_column(String, nullable=False, default="")
     deskripsi: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    min_order: Mapped[str] = mapped_column(String, nullable=False, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+
+
+class OngkirRow(Base):
+    """Shipping cost per wilayah (katering). Uploaded via XLSX 'Ongkir' sheet."""
+
+    __tablename__ = "ongkir_rows"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    wilayah: Mapped[str] = mapped_column(String, nullable=False)
+    ongkir: Mapped[str] = mapped_column(String, nullable=False, default="")
+    min_order: Mapped[str] = mapped_column(String, nullable=False, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
 
 
@@ -197,7 +211,7 @@ class Checkpoint(Base):
 
     config_key: Mapped[str] = mapped_column(String, primary_key=True)  # serialized JSON of config
     fnode_id: Mapped[str] = mapped_column(String, primary_key=True)
-    state: Mapped[bytes] = mapped_column()  # Pickled state for simplicity
+    state: Mapped[str] = mapped_column(Text, nullable=False, default="{}")  # Safe JSON serialized state
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=_utcnow, onupdate=_utcnow, nullable=False

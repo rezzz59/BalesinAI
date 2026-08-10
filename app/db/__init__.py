@@ -48,6 +48,17 @@ def _run_migrations() -> None:
             conn.commit()
             logger.info("migration: added tenant_config.gateway_plan")
 
+        cat_cols = {
+            row[1]
+            for row in conn.execute(text("PRAGMA table_info(catalog_rows)")).fetchall()
+        }
+        if "min_order" not in cat_cols:
+            conn.execute(text(
+                "ALTER TABLE catalog_rows ADD COLUMN min_order VARCHAR NOT NULL DEFAULT ''"
+            ))
+            conn.commit()
+            logger.info("migration: added catalog_rows.min_order")
+
 
 def init_db() -> None:
     """Create DB tables based on ORM metadata. Idempotent — safe to call repeatedly."""
