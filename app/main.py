@@ -38,6 +38,8 @@ from app.services.sheets import GoogleSheetsClient
 from app.services.phone_gateway import PhoneGatewayException
 from app.services.fonnte import FonnteGateway, FonnteError
 from app.services.crypto import decrypt_api_key
+from app.services.followup import auto_followup_loop
+import asyncio
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -48,7 +50,9 @@ async def lifespan(app: FastAPI):
     """Startup and shutdown events."""
     init_db()
     logger.info("OrderCloser Lite started")
+    followup_task = asyncio.create_task(auto_followup_loop())
     yield
+    followup_task.cancel()
     logger.info("OrderCloser Lite shutting down")
 
 
@@ -719,6 +723,8 @@ async def dashboard_settings_endpoint(request: Request, tenant_id: str = ""):
         "custom_behavior": onboarding_data.get("custom_behavior", ""),
         "knowledge_text": onboarding_data.get("knowledge_text", ""),
         "welcome_message": onboarding_data.get("welcome_message", ""),
+        "followup_delay_minutes": onboarding_data.get("followup_delay_minutes", 0),
+        "followup_prompt": onboarding_data.get("followup_prompt", ""),
     }
     return {
         "tenant_id": tenant,

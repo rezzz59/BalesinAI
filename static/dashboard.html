@@ -462,6 +462,22 @@
             <textarea id="inp-knowledge" class="input w-100" rows="4" placeholder="Jam operasional kami Senin-Sabtu 09.00-17.00..."></textarea>
             <button class="btn btn-sm mt-2" onclick="saveSetting('knowledge', 'inp-knowledge')">Simpan</button>
           </div>
+          
+          <hr class="my-4" style="border-color: var(--border);">
+          
+          <div style="margin-bottom: 1rem;">
+            <label class="font-medium text-sm block mb-1">AI Follow-up (Anti-Ghosting)</label>
+            <p class="text-xs text-mute mb-2">Kirim pesan otomatis saat pelanggan tidak merespons setelah sekian menit.</p>
+            
+            <div class="flex items-center gap-2 mb-2">
+                <span class="text-sm">Tunggu selama</span>
+                <input type="number" id="inp-followup-delay" class="input" style="width: 80px;" placeholder="0" min="0">
+                <span class="text-sm">menit. (Isi 0 untuk menonaktifkan)</span>
+            </div>
+            
+            <textarea id="inp-followup-prompt" class="input w-100" rows="3" placeholder="Instruksi untuk AI: 'Beri tahu pelanggan ada promo ongkir jika mereka order hari ini.'"></textarea>
+            <button class="btn btn-sm mt-2" onclick="saveFollowup()">Simpan Follow-up</button>
+          </div>
         </div>
       </div>
     </div>
@@ -766,6 +782,40 @@ async function loadSettings() {
   if(document.getElementById("inp-welcome")) document.getElementById("inp-welcome").value = s.welcome_message || "";
   if(document.getElementById("inp-behavior")) document.getElementById("inp-behavior").value = s.custom_behavior || "";
   if(document.getElementById("inp-knowledge")) document.getElementById("inp-knowledge").value = s.knowledge_text || "";
+  if(document.getElementById("inp-followup-delay")) document.getElementById("inp-followup-delay").value = s.followup_delay_minutes || 0;
+  if(document.getElementById("inp-followup-prompt")) document.getElementById("inp-followup-prompt").value = s.followup_prompt || "";
+}
+
+async function saveFollowup() {
+  const delay = parseInt(document.getElementById("inp-followup-delay").value) || 0;
+  const prompt = document.getElementById("inp-followup-prompt").value;
+  const btn = document.querySelector(`#inp-followup-prompt + button`);
+  const oldText = btn.innerText;
+  
+  btn.innerText = "Menyimpan...";
+  btn.disabled = true;
+  
+  try {
+    const r = await fetch(`/api/onboard/followup`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ delay_minutes: delay, prompt: prompt })
+    });
+    
+    if(!r.ok) throw new Error("Gagal menyimpan");
+    
+    btn.innerText = "Tersimpan ✓";
+    btn.classList.add("btn-outline");
+    setTimeout(() => {
+      btn.innerText = oldText;
+      btn.classList.remove("btn-outline");
+      btn.disabled = false;
+    }, 2000);
+  } catch(e) {
+    alert("Gagal menyimpan: " + e.message);
+    btn.innerText = oldText;
+    btn.disabled = false;
+  }
 }
 
 async function saveSetting(type, inputId) {

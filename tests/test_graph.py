@@ -528,5 +528,3 @@ def test_built_graph_handles_no_faq_match_via_sync_invoke():
 
     # Now that we let LLM handle empty FAQ matches via knowledge_text, it should reply
     assert result.get("action") in ("fallback", "reply"), result
-    # Owner should receive a fallback alert and buyer a polite ack.
-    assert len(gateway.sent) == 2

@@ -221,6 +221,8 @@ async def onboard_status(request: Request):
         "custom_behavior": onboarding_data.get("custom_behavior", ""),
         "knowledge_text": onboarding_data.get("knowledge_text", ""),
         "welcome_message": onboarding_data.get("welcome_message", ""),
+        "followup_delay_minutes": onboarding_data.get("followup_delay_minutes", 0),
+        "followup_prompt": onboarding_data.get("followup_prompt", ""),
     }
 
 
@@ -514,3 +516,23 @@ async def update_welcome_message(req: WelcomeMessageRequest, user=Depends(curren
     update_onboarding_data(user.uid, data)
     
     return {"status": "ok", "message": "Welcome message updated"}
+
+class FollowupRequest(BaseModel):
+    delay_minutes: int
+    prompt: str
+
+@router.put("/followup")
+async def update_followup(req: FollowupRequest, user=Depends(current_user)):
+    """Set AI Follow-up (anti-ghosting) configuration."""
+    tenant = _user_tenant(user)
+    try:
+        import json
+        data = json.loads(tenant["onboarding_data"] or "{}")
+    except Exception:
+        data = {}
+        
+    data["followup_delay_minutes"] = max(0, req.delay_minutes)
+    data["followup_prompt"] = req.prompt.strip()
+    update_onboarding_data(user.uid, data)
+    
+    return {"status": "ok", "message": "Follow-up settings updated"}

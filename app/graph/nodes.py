@@ -211,6 +211,16 @@ def classify_intent(state: ChatState, llm_client: Any) -> dict:
     # Handle empty/whitespace-only messages early
     message = state.get("message_text", "") or ""
     stripped_message = message.strip()
+    
+    if stripped_message.startswith("__SYSTEM_AUTO_FOLLOWUP__"):
+        return {
+            "intent": "auto_followup",
+            "confidence": 1.0,
+            "has_complaint_signal": False,
+            "has_objection_signal": False,
+            "sentiment": "neutral",
+        }
+        
     if not stripped_message:
         logger.warning(
             "empty_message_detected",
@@ -513,6 +523,39 @@ def _compose_with_llm(state: ChatState, llm_client: Any) -> dict:
             "action": "order",
             "messages": messages + [{"role": "user", "content": state["message_text"]}, {"role": "assistant", "content": reply}],
         }
+        
+    if intent == "auto_followup":
+        # The prompt is embedded in the message_text after the prefix
+        msg = state.get("message_text", "")
+        followup_prompt = msg.replace("__SYSTEM_AUTO_FOLLOWUP__", "").strip()
+        sys_prompt = (
+            "KONTEKS: Pelanggan tidak membalas pesan terakhir Anda selama beberapa waktu.\n"
+            "TUGAS: Kirimkan SATU pesan follow-up yang ramah dan sopan untuk menarik kembali minat mereka.\n"
+            f"INSTRUKSI KHUSUS DARI OWNER: {followup_prompt}\n\n"
+            "Hard constraints:\n"
+            "- JANGAN membahas hal teknis, cukup menyapa dengan ramah.\n"
+            "- Balas dengan ringkas (1-2 kalimat pendek) namun luwes dan natural.\n"
+            "- Gunakan sapaan 'Kak' dan kata ganti 'kami'."
+        )
+        try:
+            reply = llm_client.compose_reply_with_history(
+                messages=state.get("messages", []) or [],
+                message="[SYSTEM] Buat pesan follow-up sekarang.",
+                retrieved_row=None,
+                match_kind="none",
+                customer_context=None,
+                persona=(persona or "") + "\n\n" + sys_prompt,
+            )
+            return {
+                "reply_text": reply,
+                "action": "reply",
+                "messages": (state.get("messages", []) or []) + [
+                    {"role": "assistant", "content": reply},
+                ],
+            }
+        except Exception as e:
+            logger.warning("followup_compose_failed", extra={"tenant_id": state["tenant_id"], "error": str(e)})
+            return {"reply_text": "", "action": "error"}
 
     message = state["message_text"]
     strict_hint = (

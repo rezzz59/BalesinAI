@@ -63,6 +63,8 @@ def should_fallback(state: ChatState, threshold: float | None = None) -> bool:
 
 def route_after_classify(state: ChatState) -> str:
     """Route after classify_intent node. Sets fallback_reason if routing to fallback."""
+    if state.get("intent") == "auto_followup":
+        return "compose_reply"
     if should_fallback(state):
         # Populate fallback_reason so fallback_human sees it.
         # We mutate state via a no-op return — langgraph's conditional edge
@@ -209,6 +211,7 @@ def build_graph(
             "lookup_catalog": "lookup_catalog",
             "fallback_human": "fallback_human",
             "capture_order": "capture_order",
+            "compose_reply": "compose_reply",
         },
     )
     g.add_conditional_edges(
