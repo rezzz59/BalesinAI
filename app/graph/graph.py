@@ -52,6 +52,9 @@ def should_fallback(state: ChatState, threshold: float | None = None) -> bool:
     if state.get("has_complaint_signal") or state.get("has_objection_signal"):
         return True
     if state.get("intent") == "unclear":
+        # Don't fallback on unclear if this is the very first message (allow welcome message)
+        if not state.get("messages"):
+            return False
         return True
     if state.get("confidence", 0.0) < threshold:
         return True
@@ -73,8 +76,10 @@ def route_after_classify(state: ChatState) -> str:
 def route_after_lookup(state: ChatState) -> str:
     """Route after lookup_catalog node. Fallback if lookup returned nothing for faq/product."""
     intent = state.get("intent")
-    if intent == "faq" and not state.get("catalog_answer") and not state.get("product_match"):
-        return "compose_reply_fallback"
+    # For FAQ, even if catalog/FAQ sheets are empty, we route to compose_reply 
+    # because the answer might be in the unstructured `knowledge_text` (injected in prompt).
+    if intent == "faq":
+        return "analyze_customer_context"
     if intent == "check_product" and not state.get("product_match") and not state.get("reply_text"):
         return "compose_reply_fallback"
     return "analyze_customer_context"

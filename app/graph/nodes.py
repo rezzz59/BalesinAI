@@ -56,6 +56,23 @@ def _persona_for_tenant(tenant_id: str) -> str | None:
         if tenant is None:
             return DEFAULT_PERSONA
         persona = PERSONA_TEMPLATES.get(tenant.get("business_type", "jualan"), DEFAULT_PERSONA)
+        
+        # Inject style profile and custom behavior if present
+        import json as _json
+        data = _json.loads(tenant.get("onboarding_data") or "{}")
+        custom_behavior = data.get("custom_behavior", "").strip()
+        
+        if custom_behavior:
+            persona = f"{persona}\n\nATURAN KHUSUS TOKO:\n{custom_behavior}"
+            
+        knowledge_text = data.get("knowledge_text", "").strip()
+        if knowledge_text:
+            persona = f"{persona}\n\nINFORMASI TAMBAHAN (SOP/FAQ):\n{knowledge_text}"
+            
+        welcome_message = data.get("welcome_message", "").strip()
+        if welcome_message:
+            persona = f"{persona}\n\nATURAN WELCOME MESSAGE:\nJika ini adalah chat pertama dari pelanggan (belum ada histori percakapan sebelumnya), Anda WAJIB mengawali balasan Anda dengan kalimat sapaan berikut persis seperti ini: \"{welcome_message}\""
+            
         style = _style_profile_block(tenant)
         if style:
             persona = f"{persona}\n\n{style}"
@@ -172,8 +189,7 @@ def fallback_reason_for(state: ChatState, threshold: float | None = None) -> str
         return "low_confidence"
 
     intent = state.get("intent")
-    if intent == "faq" and not state.get("catalog_answer") and not state.get("product_match"):
-        return "no_faq_match"
+    # faq doesn't instantly fallback anymore, LLM will handle it via knowledge_text
     if intent == "check_product" and not state.get("product_match"):
         return "no_product_match"
 

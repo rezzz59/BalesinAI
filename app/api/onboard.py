@@ -13,7 +13,8 @@ import re
 import secrets
 import shutil
 
-from fastapi import APIRouter, HTTPException, Request, UploadFile
+from fastapi import APIRouter, HTTPException, Request, UploadFile, Depends
+from pydantic import BaseModel
 
 from app.api.auth import current_user
 from app.config import get_settings
@@ -443,3 +444,64 @@ async def upload_photo(request: Request, file: UploadFile):
     settings = get_settings()
     url = f"{settings.base_url}/media/{tenant['tenant_id']}/{safe}"
     return {"status": "ok", "filename": file.filename, "product": name, "url": url}
+class BehaviorRequest(BaseModel):
+    behavior: str
+
+@router.put("/behavior")
+async def update_behavior(req: BehaviorRequest, user=Depends(current_user)):
+    """Set custom AI Agent Behavior instructions.
+    
+    This text is injected directly into the system prompt to customize the
+    bot's tone, rules, or upselling strategies (Cekat AI parity).
+    """
+    tenant = _user_tenant(user)
+    try:
+        import json
+        data = json.loads(tenant["onboarding_data"] or "{}")
+    except Exception:
+        data = {}
+        
+    data["custom_behavior"] = req.behavior.strip()
+    update_onboarding_data(user.uid, data)
+    
+    return {"status": "ok", "message": "Behavior updated"}
+
+class KnowledgeRequest(BaseModel):
+    knowledge_text: str
+
+@router.put("/knowledge")
+async def update_knowledge(req: KnowledgeRequest, user=Depends(current_user)):
+    """Set custom knowledge base text (SOP/FAQ/Company Info).
+    
+    This unstructured text is injected into the system prompt so the AI
+    knows how to answer specific questions without needing a structured FAQ sheet.
+    """
+    tenant = _user_tenant(user)
+    try:
+        import json
+        data = json.loads(tenant["onboarding_data"] or "{}")
+    except Exception:
+        data = {}
+        
+    data["knowledge_text"] = req.knowledge_text.strip()
+    update_onboarding_data(user.uid, data)
+    
+    return {"status": "ok", "message": "Knowledge updated"}
+
+class WelcomeMessageRequest(BaseModel):
+    welcome_message: str
+
+@router.put("/welcome")
+async def update_welcome_message(req: WelcomeMessageRequest, user=Depends(current_user)):
+    """Set the welcome message for new conversations."""
+    tenant = _user_tenant(user)
+    try:
+        import json
+        data = json.loads(tenant["onboarding_data"] or "{}")
+    except Exception:
+        data = {}
+        
+    data["welcome_message"] = req.welcome_message.strip()
+    update_onboarding_data(user.uid, data)
+    
+    return {"status": "ok", "message": "Welcome message updated"}

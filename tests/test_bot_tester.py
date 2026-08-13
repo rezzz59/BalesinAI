@@ -85,15 +85,16 @@ class FakeSemantic:
 
 
 class FakeLLM:
-    def __init__(self, intent="faq", confidence=0.9, reply="Terima kasih sudah bertanya, Kak! Kami bantu segera 🙏"):
+    def __init__(self, intent="faq", confidence=0.9, reply="Terima kasih sudah bertanya, Kak! Kami bantu segera 🙏", has_complaint_signal=False):
         self.intent = intent
         self.confidence = confidence
         self.reply = reply
+        self.has_complaint_signal = has_complaint_signal
         self.compose_calls = 0
 
     def classify_with_history(self, messages):
         return {"intent": self.intent, "confidence": self.confidence,
-                "has_complaint_signal": False, "sentiment": "neutral"}
+                "has_complaint_signal": self.has_complaint_signal, "sentiment": "neutral"}
 
     def classify(self, message):
         return self.classify_with_history([{"role": "user", "content": message}])
@@ -142,7 +143,7 @@ class TestDryRunReply:
 
     def test_fallback_path_runs_headless(self, reset_db):
         tenant_id = _setup_tenant()
-        llm = FakeLLM(intent="unclear", confidence=0.3)
+        llm = FakeLLM(intent="unclear", confidence=0.3, has_complaint_signal=True)
         sheets = FakeSheets(faq_rows=[], catalog_rows=[])
         out = dry_run_reply(tenant_id, "random", llm_client=llm, sheets_client=sheets,
                             semantic_search_client=FakeSemantic())

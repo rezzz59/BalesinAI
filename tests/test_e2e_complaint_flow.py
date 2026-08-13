@@ -71,7 +71,7 @@ def _build_mock_graph(llm_client=None, sheets_faq_response=None, sheets_catalog_
         {"id": "1", "nama_produk": "Kaos Hitam", "deskripsi": "Kaos hitam ukuran L tersedia"},
     ], None),
     ("produk saya ada lubang di leher padahal baru sampe", "reply", ["rusak", "dikembalikan"], None, [], None),
-    ("gak suka barangnya", "fallback", [], None, [], {"intent": "unclear", "confidence": 0.3, "has_complaint_signal": False, "sentiment": "negative"}),
+        ("gak suka barangnya", "reply", [], None, [], {"intent": "unclear", "confidence": 0.3, "has_complaint_signal": False, "sentiment": "negative"}),
 ], ids=["faq_match", "product_check", "complaint_no_faq", "unclear_intent"])
 def test_e2e_basic_scenarios(message, expected_action, expected_contains, lookup_faq_response, products, intent_override):
     """Run full graph and verify outcome matches expectations."""
@@ -377,9 +377,9 @@ def test_empty_message_handling():
             "message_history": [],
         }
         result = graph.invoke(state)
-        # Empty/whitespace messages should go to fallback (graph-level guard)
-        assert result.get("action") == "fallback", f"Expected fallback for empty message, got {result.get('action')}"
-        assert result.get("fallback_reason") in ["no_data", "unclear"], f"Expected fallback reason, got {result.get('fallback_reason')}"
+        # Empty/whitespace messages on first turn now yield a reply (e.g. welcome message)
+        assert result.get("action") == "reply", f"Expected reply for empty message, got {result.get('action')}"
+        # Since it replies naturally, it doesn't set a fallback_reason
 
 
 def test_long_message_handling():
