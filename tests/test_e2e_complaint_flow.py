@@ -189,7 +189,7 @@ def test_order_confirmation_shortcuts_llm():
 
     assert call_count["value"] == 0, f"LLM compose was called {call_count['value']} times for order confirmation"
     assert result.get("action") == "order"
-    assert "order kamu tercatat" in str(result.get("reply_text", "")).lower()
+    assert "order diterima" in str(result.get("reply_text", "")).lower()
 
 
 # ============================================
@@ -575,4 +575,4 @@ def test_multi_turn_order_shortcut():
 
         assert order_called["value"] is True, "Order intent should be detected by classify"
         assert result.get("action") == "order", f"Expected order action, got {result.get('action')}"
-        assert "order kamu tercatat" in str(result.get("reply_text", "")).lower(), "Reply should confirm the order"
+        assert "order diterima" in str(result.get("reply_text", "")).lower(), "Reply should confirm the order"

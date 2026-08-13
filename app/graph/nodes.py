@@ -11,6 +11,36 @@ from app.services.sheets import FAQ_MATCH_THRESHOLD, _score_faq_row
 
 logger = logging.getLogger(__name__)
 
+# Deterministic confirm_order override: a message with a definite order verb
+# PLUS a quantity is an order even when it ends with a price/total question
+# (e.g. "mau pesan paket prasmanan a 100 porsi ... totalnya berapa ya?").
+# The LLM sometimes classifies the trailing question as faq; this guard fixes
+# that without touching genuine faq questions ("bisa pesan?", "cara order?").
+_ORDER_VERBS = (
+    "mau pesan", "saya pesan", "aku pesan", "kita pesan", "saya mau pesan",
+    "mau order", "saya order", "aku order", "mau beli", "saya beli",
+    "aku beli", "checkout", "booking",
+)
+_QTY_RE = re.compile(r"\d{1,3}\s*(?:porsi|pcs|unit|buah|biji|orang|pack|kotak|pax|kg|l)\b", re.IGNORECASE)
+
+
+def _looks_like_order(message: str) -> bool:
+    """True when a message states a definite order (verb + quantity).
+
+    A verb negated by "belum" directly before it ("belum mau pesan",
+    "belum mau beli") does not count — that is a price question, not an order.
+    """
+    msg = (message or "").lower()
+    for v in _ORDER_VERBS:
+        idx = msg.find(v)
+        if idx == -1:
+            continue
+        if msg[max(0, idx - 8):idx].rstrip().endswith("belum"):
+            continue
+        if _QTY_RE.search(msg):
+            return True
+    return False
+
 
 def _persona_for_tenant(tenant_id: str) -> str | None:
     """Resolve the store-persona instruction for a tenant's business_type.
@@ -20,15 +50,51 @@ def _persona_for_tenant(tenant_id: str) -> str | None:
     """
     try:
         from app.db.tenant_repo import get_tenant
-        from app.graph.prompts import PERSONA_TEMPLATES, DEFAULT_PERSONA
+        from app.graph.prompts import DEFAULT_PERSONA, PERSONA_TEMPLATES
 
         tenant = get_tenant(tenant_id)
         if tenant is None:
             return DEFAULT_PERSONA
-        return PERSONA_TEMPLATES.get(tenant.get("business_type", "jualan"), DEFAULT_PERSONA)
+        persona = PERSONA_TEMPLATES.get(tenant.get("business_type", "jualan"), DEFAULT_PERSONA)
+        style = _style_profile_block(tenant)
+        if style:
+            persona = f"{persona}\n\n{style}"
+        return persona
     except Exception as e:  # noqa: BLE001
         logger.warning("persona_resolve_failed", extra={"tenant_id": tenant_id, "error": str(e)})
         return None
+
+
+def _style_profile_block(tenant: dict) -> str:
+    """Build a 'gaya bicara toko' instruction block from the stored style_profile."""
+    import json as _json
+
+    try:
+        data = _json.loads(tenant.get("onboarding_data") or "{}")
+        sp = data.get("style_profile") or {}
+        sp = sp.get("style_profile") if isinstance(sp, dict) else None
+        if not isinstance(sp, dict):
+            return ""
+    except (ValueError, TypeError):
+        return ""
+
+    labels = [
+        ("formality", "Tingkat formalitas"),
+        ("emoji_density", "Penggunaan emoji"),
+        ("sentence_length", "Panjang kalimat"),
+        ("tone", "Nada bicara"),
+    ]
+    parts = [
+        f"- {label}: {sp[k]}"
+        for k, label in labels
+        if isinstance(sp.get(k), str) and sp[k]
+    ]
+    phrases = [p for p in (sp.get("key_phrases") or []) if isinstance(p, str) and p.strip()]
+    if phrases:
+        parts.append("- Frasa khas: " + ", ".join(f'"{p}"' for p in phrases[:4]))
+    if not parts:
+        return ""
+    return "GAYA BICARA TOKO (tiru gaya ini dalam setiap balasan):\n" + "\n".join(parts)
 
 
 def _to_match_kind(score: float) -> str:
@@ -106,7 +172,7 @@ def fallback_reason_for(state: ChatState, threshold: float | None = None) -> str
         return "low_confidence"
 
     intent = state.get("intent")
-    if intent == "faq" and not state.get("catalog_answer"):
+    if intent == "faq" and not state.get("catalog_answer") and not state.get("product_match"):
         return "no_faq_match"
     if intent == "check_product" and not state.get("product_match"):
         return "no_product_match"
@@ -168,8 +234,16 @@ def classify_intent(state: ChatState, llm_client: Any) -> dict:
                 "history_turns": len(messages),
             },
         )
+        intent = result["intent"]
+        if intent == "faq" and _looks_like_order(state.get("message_text", "")):
+            intent = "confirm_order"
+            result["confidence"] = max(result["confidence"], 0.9)
+            logger.info(
+                "order_intent_override",
+                extra={"tenant_id": state["tenant_id"], "thread_id": state["thread_id"]},
+            )
         return {
-            "intent": result["intent"],
+            "intent": intent,
             "confidence": result["confidence"],
             "has_complaint_signal": result.get("has_complaint_signal", False),
             "has_objection_signal": result.get("has_objection_signal", False),
@@ -233,6 +307,24 @@ def lookup_catalog(
         if intent == "faq":
             match = sheets_client.lookup_faq(state["message_text"])
             if match is None:
+                # If FAQ yields no match, try searching the catalog. 
+                # RAG strategy: the answer to "berapa harga kemeja?" is in the catalog row.
+                products = sheets_client.read_catalog()
+                best_cat_score = 0.0
+                best_cat_product = None
+                for product in products:
+                    score = _score_faq_row(state["message_text"], product)
+                    if score > best_cat_score:
+                        best_cat_score = score
+                        best_cat_product = product
+                if best_cat_product is not None and best_cat_score >= FAQ_MATCH_THRESHOLD:
+                    # RAG hybrid: use product catalog to answer FAQ (e.g. "harga kemeja?")
+                    return {
+                        "catalog_answer": None,
+                        "product_match": best_cat_product,
+                        "match_kind": _to_match_kind(best_cat_score),
+                    }
+                
                 # Fall back to the industry blueprint (generic FAQ) so a store
                 # that hasn't filled its sheet yet can still answer common
                 # questions. Blueprint answers are deliberately generic and
@@ -416,7 +508,9 @@ def _compose_with_llm(state: ChatState, llm_client: Any) -> dict:
         "\n\n[Style hint: your reply must END with exactly ONE guiding question that "
         "invites the buyer to reply (and no more than one question in total). Never "
         "end with a plain statement, a price list, or passive thanks — otherwise the "
-        "buyer will stop replying (ghosting).]"
+        "buyer will stop replying (ghosting). If the buyer already named a size, color, "
+        "or variant, do NOT ask them to choose it again — acknowledge their choice and "
+        "only ask the open detail that is still unknown.]"
     )
 
     # 2-5. Try up to 2 attempts (initial + 1 retry) before falling back.
@@ -447,7 +541,7 @@ def _compose_with_llm(state: ChatState, llm_client: Any) -> dict:
                 "messages": messages,
             }
         except LLMValidationError as e:
-            if "question" in str(e) or "emoji" in str(e) or "sentences" in str(e):
+            if "question" in str(e) or "emoji" in str(e) or "sentences" in str(e) or "listener" in str(e):
                 retry_hint = style_hint
             logger.warning(
                 "compose_validation_failed",
@@ -457,6 +551,8 @@ def _compose_with_llm(state: ChatState, llm_client: Any) -> dict:
                     "error": str(e),
                 },
             )
+            print("VALIDATION ERROR:", str(e))
+            print("REPLY WAS:", reply)
             # Loop continues to retry (or fall through to verbatim).
             continue
         except LLMError as e:
@@ -607,7 +703,9 @@ async def send_whatsapp(state: ChatState, gateway_client: Any) -> dict:
 
     Returns {action: "error"} on failure.
     """
-    from app.services.phone_gateway import PhoneGatewayException  # Local import to avoid circular deps
+    from app.services.phone_gateway import (
+        PhoneGatewayException,  # Local import to avoid circular deps
+    )
 
     photo_url = state.get("photo_url")
     if photo_url:
@@ -757,10 +855,11 @@ async def fallback_human(state: ChatState, gateway_client: Any) -> dict:
     admin already sees the buyer thread on that device, so only the buyer
     acknowledgement is sent and the thread is flagged for the dashboard.
     """
-    from app.services.phone_gateway import PhoneGatewayException  # Local import to avoid circular deps
-
     # Need owner_wa_number — but it's not in ChatState. Read from tenant repo.
     from app.db.tenant_repo import get_tenant
+    from app.services.phone_gateway import (
+        PhoneGatewayException,  # Local import to avoid circular deps
+    )
 
     fallback_reason = state.get("fallback_reason") or fallback_reason_for(state) or "n/a"
     sentiment = state.get("sentiment", "neutral")
@@ -863,6 +962,11 @@ async def capture_order(
     order_code: str | None = None
     catering_meta: dict | None = None
 
+    from app.db.tenant_repo import get_tenant as _get_tenant
+
+    _tenant = _get_tenant(tenant_id)
+    business_type = (_tenant or {}).get("business_type", "jualan")
+
     try:
         catalog = sheets_client.read_catalog() if persist_orders or True else []
         new_items = extract_items(message, catalog)
@@ -871,10 +975,7 @@ async def capture_order(
         total = compute_total(items)
 
         # Catering: add ongkir + DP + min-order + event-date rules.
-        from app.db.tenant_repo import get_tenant as _get_tenant
-
-        _tenant = _get_tenant(tenant_id)
-        if _tenant and (_tenant.get("business_type") == "kuliner"):
+        if business_type == "kuliner":
             from app.services.business_rules import catering_quote
 
             ongkir_rows = []
@@ -891,11 +992,25 @@ async def capture_order(
         )
         items, buyer_name, buyer_address, total = [], None, None, None
 
-    # Persist (best-effort) when enabled. Dry-run (test-chat) skips writes.
-    # Catering orders without an event date are NOT persisted — the quote is a
-    # preview until the kitchen schedule is confirmed.
-    _catering_incomplete = bool(catering_meta and catering_meta.get("needs_date"))
-    if persist_orders and not _catering_incomplete:
+    # --- Order state machine: "diterima" only when every required field is in.
+    # Anything less is a CONSULTATION reply (quote + ask the missing field) and
+    # is never persisted as an order.
+    size = (items[0].get("size") if items else None) or None
+    color = (items[0].get("color") if items else None) or None
+    if business_type == "kuliner":
+        complete = bool(
+            items
+            and catering_meta
+            and not catering_meta.get("needs_date")
+            and catering_meta.get("min_order_gap", 0) == 0
+        )
+    elif business_type == "fashion":
+        complete = bool(items) and bool(size) and bool(color) and all((i.get("qty") or 0) >= 1 for i in items)
+    else:
+        complete = bool(items)
+
+    if complete:
+        # Persist (best-effort) when enabled. Dry-run (test-chat) skips writes.
         try:
             from app.db.order_repo import insert_order
 
@@ -919,40 +1034,40 @@ async def capture_order(
         except Exception as e:  # noqa: BLE001
             logger.error("order_insert_failed", extra={"tenant_id": tenant_id, "error": str(e)})
 
-    # Owner notification (best-effort, only when persisting real orders).
-    # Skipped when the target is the bot's own device (self-notify guard).
-    if persist_orders and not _catering_incomplete:
-        try:
-            from app.db.tenant_repo import get_tenant
-
-            tenant = get_tenant(tenant_id)
-            if tenant is not None and not _is_self_notify(tenant, _notify_target(tenant)):
-                owner_msg = _format_owner_order_message(
-                    state, items, total, buyer_name, buyer_address, order_code
-                )
-                await gateway_client.send_message(
-                    phone=_notify_target(tenant),
-                    message=owner_msg,
-                )
-        except Exception as e:  # noqa: BLE001
-            logger.error("order_owner_notify_failed", extra={"tenant_id": tenant_id, "error": str(e)})
+        # Owner notification (best-effort, only when persisting real orders).
+        # Skipped when the target is the bot's own device (self-notify guard).
+        if persist_orders:
+            try:
+                tenant = get_tenant(tenant_id)
+                if tenant is not None and not _is_self_notify(tenant, _notify_target(tenant)):
+                    owner_msg = _format_owner_order_message(
+                        state, items, total, buyer_name, buyer_address, order_code
+                    )
+                    await gateway_client.send_message(
+                        phone=_notify_target(tenant),
+                        message=owner_msg,
+                    )
+            except Exception as e:  # noqa: BLE001
+                logger.error("order_owner_notify_failed", extra={"tenant_id": tenant_id, "error": str(e)})
 
     if catering_meta:
         from app.services.business_rules import format_catering_reply
 
-        reply = format_catering_reply(catering_meta, items)
-    else:
+        reply = format_catering_reply(catering_meta, items, confirmed=complete)
+    elif complete:
         reply = _format_order_confirmation(
             message, items, total, buyer_name, buyer_address, order_code
         )
+    else:
+        reply = _format_order_consultation(items, size, color, business_type)
     return {
         "reply_text": reply,
-        "action": "order",
+        "action": "order" if complete else "reply",
         "order_id": order_id,
         "order_code": order_code,
-        "order_items": items,
-        "order_total": total,
-        "order_draft": items,
+        "order_items": items if complete else [],
+        "order_total": total if complete else None,
+        "order_draft": items if items else [],
         "catering_meta": catering_meta,
     }
 
@@ -973,19 +1088,18 @@ def _format_order_confirmation(
     buyer_address: str | None,
     order_code: str | None,
 ) -> str:
-    """Buyer-facing acknowledgment. If nothing was extracted, ask for the item."""
+    """Buyer-facing acknowledgment for a COMPLETE order. If nothing was
+    extracted (shouldn't happen — incomplete orders go to consultation), ask."""
     ref = f" ({order_code})" if order_code else ""
     if not items:
-        return (
-            f"Noted Kak 🙏 Order kamu tercatat{ref}. Contoh penulisannya: 'kaos hitam 2 pcs'. "
-            f"Nah, produk & jumlahnya mau berapa ya, Kak? 😊"
-        )
+        return "Boleh disebutkan Kak, mau pesan yang mana dan berapa banyak?"
     lines = [f"Order diterima{ref}! 🎉", ""]
     for it in items:
         qty = it.get("qty", 1)
         price = it.get("price")
+        variant = _variant_suffix(it)
         subtotal = _format_price(price * qty) if price is not None else None
-        lines.append(f"• {it['product']} x{qty}" + (f" = {subtotal}" if subtotal else ""))
+        lines.append(f"• {it['product']}{variant} x{qty}" + (f" = {subtotal}" if subtotal else ""))
     if total is not None:
         lines.append("")
         lines.append(f"Total: {_format_price(total)}")
@@ -1000,6 +1114,52 @@ def _format_order_confirmation(
         "Boleh tahu, Kakak mau bayar dengan metode apa — transfer atau e-wallet? 😊"
     )
     return "\n".join(lines)
+
+
+def _variant_suffix(item: dict) -> str:
+    """' (size L, hitam)' for a fashion item when the buyer named variants."""
+    parts = [f"size {item['size']}" if item.get("size") else None,
+             item.get("color") if item.get("color") else None]
+    parts = [p for p in parts if p]
+    return f" ({', '.join(parts)})" if parts else ""
+
+
+def _format_order_consultation(
+    items: list[dict],
+    size: str | None,
+    color: str | None,
+    business_type: str,
+) -> str:
+    """CONSULTATION reply for an incomplete order — never 'diterima', never
+    persisted. Asks only for the field that is actually missing."""
+    if not items:
+        if business_type == "kuliner":
+            return "Boleh disebutkan Kak, mau pesan paket yang mana dan berapa porsi?"
+        return "Boleh disebutkan Kak, mau pesan yang mana dan berapa banyak?"
+    
+    if business_type == "fashion":
+        if not size and not color:
+            return (
+                f"Baik Kak, untuk {items[0]['product']}nya. "
+                "Biar kami bantu siapkan, boleh diisi format ini ya Kak:\n\n"
+                "Ukuran:\n"
+                "Warna:\n"
+                "Jumlah:\n"
+            )
+        if not size:
+            return f"Untuk {items[0]['product']}nya mau ukuran apa ya, Kak?"
+        if not color:
+            return f"Untuk {items[0]['product']}nya mau warna apa ya, Kak?"
+            
+    if business_type == "kuliner":
+        return (
+            "Siap Kak! Untuk pesanannya, boleh dilengkapi dengan format ini ya:\n\n"
+            "Pesanan & Jumlah:\n"
+            "Tanggal Acara:\n"
+            "Alamat Pengiriman:\n"
+        )
+        
+    return "Untuk pesanannya, boleh dilengkapi dulu detailnya ya Kak, biar kami siapkan dengan benar."
 
 
 def _format_owner_order_message(

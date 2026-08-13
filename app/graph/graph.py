@@ -73,7 +73,7 @@ def route_after_classify(state: ChatState) -> str:
 def route_after_lookup(state: ChatState) -> str:
     """Route after lookup_catalog node. Fallback if lookup returned nothing for faq/product."""
     intent = state.get("intent")
-    if intent == "faq" and not state.get("catalog_answer"):
+    if intent == "faq" and not state.get("catalog_answer") and not state.get("product_match"):
         return "compose_reply_fallback"
     if intent == "check_product" and not state.get("product_match") and not state.get("reply_text"):
         return "compose_reply_fallback"
@@ -138,8 +138,8 @@ def _compose_fallback_node(state):
     reason = fallback_reason_for(state) or "no_match"
     return {
         "reply_text": (
-            "Mohon tunggu sebentar ya Kak, kami cek dulu ke tim. 😊 "
-            "Sambil menunggu, boleh kami bantu cari yang lain?"
+            "Wah, untuk pertanyaan yang ini kami harus pastikan dulu ke tim ya, Kak. 🙏 "
+            "Mohon ditunggu sebentar. Sambil menunggu, barangkali ada produk lain yang Kakak cari?"
         ),
         "action": "fallback",
         "fallback_reason": reason,

@@ -14,13 +14,53 @@ from app.graph.prompts import (
     COMPOSE_USER_TEMPLATE,
     INTENT_CLASSIFICATION_SYSTEM,
     INTENT_CLASSIFICATION_USER,
+    STYLE_PROFILER_SYSTEM,
+    STYLE_PROFILER_USER,
 )
 
 logger = logging.getLogger(__name__)
 
 VALID_INTENTS = {"faq", "check_product", "confirm_order", "unclear"}
 VALID_SENTIMENTS = {"positive", "neutral", "negative"}
+VALID_STYLE_FORMALITY = {"formal", "semi-formal", "casual"}
+VALID_STYLE_EMOJI = {"none", "low", "medium", "high"}
+VALID_STYLE_LENGTH = {"concise", "detailed"}
+VALID_STYLE_TONE = {"warm_and_enthusiastic", "professional_and_direct", "humble_and_polite"}
 ClassificationResult: TypeAlias = dict[str, Any]
+
+
+def _extract_sse_content(body: str) -> str:
+    """Join assistant content deltas from an OpenAI-style SSE stream body."""
+    parts: list[str] = []
+    for line in body.splitlines():
+        line = line.strip()
+        if not line.startswith("data:"):
+            continue
+        payload = line[len("data:"):].strip()
+        if not payload or payload == "[DONE]":
+            continue
+        try:
+            chunk = json.loads(payload)
+        except json.JSONDecodeError:
+            continue
+        delta = chunk.get("choices", [{}])[0].get("delta", {}) if chunk.get("choices") else {}
+        if isinstance(delta, dict) and delta.get("content"):
+            parts.append(delta["content"])
+        elif isinstance(delta, str) and delta:
+            parts.append(delta)
+    return "".join(parts).strip()
+
+
+def _first_json_object(text: str) -> dict:
+    """Parse the first complete JSON object anywhere in *text*."""
+    decoder = json.JSONDecoder()
+    for m in re.finditer(r'\{', text):
+        try:
+            obj, _ = decoder.raw_decode(text[m.start():])
+            return obj
+        except json.JSONDecodeError:
+            continue
+    raise ValueError("no JSON object found in text")
 
 
 class LLMError(Exception):
@@ -54,6 +94,15 @@ class LLMClient(metaclass=abc.ABCMeta):
         Raises LLMError if API fails or response is invalid.
         """
         pass
+
+    def extract_style_profile(self, text: str) -> dict:
+        """Analyze raw onboarding text into {identity, style_profile,
+        key_facts_and_preferences}.
+
+        Concrete clients override this; the base default raises so clients that
+        never profiled still behave deterministically when asked.
+        """
+        raise LLMError("Style profiling not supported by this client")
 
     @abc.abstractmethod
     def compose_reply(
@@ -142,6 +191,45 @@ class MockLLMClient(LLMClient):
             last_msg = messages[-1].get("content", "") or ""
         return self.classify(last_msg)
 
+    def extract_style_profile(self, text: str) -> dict:
+        """Deterministic heuristic style profile — no external API call."""
+        text = text or ""
+        emoji_count = len(re.findall(r"[\U0001F300-\U0001FAFF\u2600-\u27BF\u2B00-\u2BFF]", text))
+        emoji_density = (
+            "none" if emoji_count == 0
+            else "low" if emoji_count == 1
+            else "medium" if emoji_count <= 3
+            else "high"
+        )
+        lower = text.lower()
+        if any(w in lower for w in ("dengan hormat", "yang terhormat", "salam sejahtera")):
+            formality = "formal"
+        elif any(w in lower for w in ("kak", "siap", "noted", "oke", "hehe", "haha", "yaa")):
+            formality = "casual"
+        else:
+            formality = "semi-formal"
+        sentences = [s for s in re.split(r"[.!?\n]+", text) if s.strip()]
+        avg_words = sum(len(s.split()) for s in sentences) / max(len(sentences), 1)
+        sentence_length = "concise" if avg_words < 10 else "detailed"
+        if any(w in lower for w in ("terima kasih", "mohon", "maaf", "silakan")):
+            tone = "humble_and_polite"
+        elif any(w in lower for w in ("mantap", "keren", "gas", "siap", "deals", "mari")):
+            tone = "warm_and_enthusiastic"
+        else:
+            tone = "professional_and_direct"
+        phrases = [kw for kw in ("siap kak", "noted", "mantap", "oke kak", "terima kasih") if kw in lower][:4]
+        return {
+            "identity": {"name": None, "role": None, "business_name": None},
+            "style_profile": {
+                "formality": formality,
+                "emoji_density": emoji_density,
+                "sentence_length": sentence_length,
+                "tone": tone,
+                "key_phrases": phrases,
+            },
+            "key_facts_and_preferences": [],
+        }
+
     def compose_reply(
         self,
         message: str,
@@ -195,44 +283,51 @@ class AdaCodeLLMClient(LLMClient):
         self._model = model
         self._session = httpx.Client(timeout=60.0)
 
-    def _chat(self, system: str, messages: list[dict[str, str]], max_tokens: int = 512) -> str:
-        """POST /v1/chat/completions and return the assistant text."""
+    def _chat(self, system: str, messages: list[dict[str, str]], max_tokens: int = 512, json_mode: bool = False, _retries: int = 2) -> str:
+        """POST /v1/chat/completions and return the assistant text.
+
+        Retries when the model returns an empty content — reasoning-style
+        models occasionally emit only reasoning and no final content.
+        """
+        payload = {
+            "model": self._model,
+            "messages": [{"role": "system", "content": system}] + messages,
+            "max_tokens": max_tokens,
+            "stream": False,
+        }
+        if json_mode:
+            payload["response_format"] = {"type": "json_object"}
         resp = self._session.post(
             f"{self._base_url}/v1/chat/completions",
             headers={"Authorization": f"Bearer {self._api_key}"},
-            json={
-                "model": self._model,
-                "messages": [{"role": "system", "content": system}] + messages,
-                "max_tokens": max_tokens,
-            },
+            json=payload,
             timeout=60.0,
         )
         resp.raise_for_status()
-        data = resp.json()
+        body = resp.text.strip()
+        # 9Router may return an SSE stream even when stream=false; extract the
+        # assistant content from the data: chunks instead of treating it as JSON.
+        if body.startswith("data:") or "\ndata:" in body:
+            content = _extract_sse_content(body)
+            if not content and _retries > 0:
+                return self._chat(system, messages, max_tokens=max_tokens, _retries=_retries - 1)
+            return content
+        # Some routers (e.g. 9Router combo) append an SSE "data: [DONE]" tail to
+        # otherwise-non-streaming responses; strip it before parsing.
+        if body.endswith("data: [DONE]"):
+            body = body[: body.rindex("data: [DONE]")].rstrip()
+        data = json.loads(body)
         try:
-            return data["choices"][0]["message"]["content"].strip()
+            content = data["choices"][0]["message"]["content"].strip()
         except (KeyError, IndexError, TypeError) as e:
             raise LLMValidationError(f"Invalid AdaCode chat response format: {e}") from e
+        if not content and _retries > 0:
+            return self._chat(system, messages, max_tokens=max_tokens, _retries=_retries - 1)
+        return content
 
     def classify(self, message: str) -> ClassificationResult:
         """Classify user message intent via AdaCode API."""
-        try:
-            text = self._chat(
-                INTENT_CLASSIFICATION_SYSTEM,
-                [{"role": "user", "content": message}],
-                max_tokens=256,
-            )
-        except LLMValidationError:
-            raise
-        except httpx.HTTPStatusError as e:
-            raise LLMError(f"AdaCode API error: {e.response.status_code} {e.response.text}") from e
-        except httpx.HTTPError as e:
-            raise LLMError(f"AdaCode HTTP error: {e}") from e
-        except Exception as e:
-            if isinstance(e, LLMError):
-                raise
-            raise LLMError(f"Unexpected AdaCode error: {e}") from e
-        return self._parse_classification(text)
+        return self._classify_call([{"role": "user", "content": message}])
 
     def classify_with_history(self, messages: list[dict[str, str]]) -> ClassificationResult:
         """Classify with history — folds the conversation into one user message."""
@@ -245,32 +340,43 @@ class AdaCodeLLMClient(LLMClient):
         if not last_msg:
             return self.classify("")
         history_text = "\n".join(f"{m.get('role', 'user')}: {m.get('content', '')}" for m in messages if isinstance(m, dict))
+        return self._classify_call([{"role": "user", "content": history_text}])
+
+    def _classify_call(self, messages: list[dict[str, str]], _retries: int = 2) -> ClassificationResult:
+        """Call _chat and parse the classification JSON, retrying on failures."""
         try:
             text = self._chat(
                 INTENT_CLASSIFICATION_SYSTEM,
-                [{"role": "user", "content": history_text}],
-                max_tokens=256,
+                messages,
+                max_tokens=512,
+                json_mode=True,
             )
         except LLMValidationError:
             raise
         except httpx.HTTPStatusError as e:
+            # 429/5xx retry — transient quota/backend hiccups.
+            if _retries > 0 and e.response.status_code in (429, 500, 502, 503, 504):
+                return self._classify_call(messages, _retries=_retries - 1)
             raise LLMError(f"AdaCode API error: {e.response.status_code} {e.response.text}") from e
         except httpx.HTTPError as e:
+            if _retries > 0:
+                return self._classify_call(messages, _retries=_retries - 1)
             raise LLMError(f"AdaCode HTTP error: {e}") from e
         except Exception as e:
             if isinstance(e, LLMError):
                 raise
             raise LLMError(f"Unexpected AdaCode error: {e}") from e
-        return self._parse_classification(text)
+        try:
+            return self._parse_classification(text)
+        except LLMValidationError:
+            if _retries > 0:
+                return self._classify_call(messages, _retries=_retries - 1)
+            raise
 
     def _parse_classification(self, text: str) -> ClassificationResult:
         """Parse JSON classification from AdaCode output."""
         try:
-            match = re.search(r'\{[^}]+\}', text)
-            if match:
-                data = json.loads(match.group())
-            else:
-                data = json.loads(text)
+            data = _first_json_object(text)
             intent = data.get("intent", "").lower()
             confidence = float(data.get("confidence", 0))
             sentiment = data.get("sentiment", "neutral").lower()
@@ -284,7 +390,28 @@ class AdaCodeLLMClient(LLMClient):
                 sentiment = "neutral"
             return {"intent": intent, "confidence": confidence, "has_complaint_signal": complaint, "has_objection_signal": objection, "sentiment": sentiment}
         except (json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
+            logger.warning("classification_parse_failed", extra={"raw_text": text[:300], "error": str(e)})
             raise LLMValidationError(f"Failed to parse AdaCode classification: {e}") from e
+
+    def extract_style_profile(self, text: str) -> dict:
+        """Analyze raw onboarding text into a style profile via AdaCode."""
+        try:
+            raw = self._chat(
+                STYLE_PROFILER_SYSTEM,
+                [{"role": "user", "content": STYLE_PROFILER_USER.format(raw_text=text)}],
+                max_tokens=2048,
+            )
+        except LLMValidationError:
+            raise
+        except httpx.HTTPStatusError as e:
+            raise LLMError(f"AdaCode style profile error: {e.response.status_code} {e.response.text}") from e
+        except httpx.HTTPError as e:
+            raise LLMError(f"AdaCode style profile HTTP error: {e}") from e
+        except Exception as e:
+            if isinstance(e, LLMError):
+                raise
+            raise LLMError(f"Unexpected AdaCode style profile error: {e}") from e
+        return _parse_style_profile(raw)
 
     def compose_reply(
         self,
@@ -313,7 +440,7 @@ class AdaCodeLLMClient(LLMClient):
         """Internal compose via chat completions."""
         prompt = self._build_compose_prompt(message, retrieved_row, match_kind, customer_context, persona, with_history=with_history, messages=messages)
         try:
-            text = self._chat(prompt, [], max_tokens=1024)
+            text = self._chat(prompt, [], max_tokens=2048)
         except LLMValidationError:
             raise
         except httpx.HTTPStatusError as e:
@@ -366,7 +493,7 @@ class GeminiLLMClient(LLMClient):
         self._genai = genai
         self._api_key = api_key
         self._genai.configure(api_key=api_key)
-        self._model = self._genai.GenerativeModel("gemini-2.0-flash")
+        self._model = self._genai.GenerativeModel("gemini-3.1-flash-lite")
 
     def classify(self, message: str) -> ClassificationResult:
         """Classify user message intent via Gemini."""
@@ -415,6 +542,17 @@ class GeminiLLMClient(LLMClient):
             return {"intent": intent, "confidence": confidence, "has_complaint_signal": complaint, "has_objection_signal": objection, "sentiment": sentiment}
         except (json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
             raise LLMValidationError(f"Failed to parse classification: {e}") from e
+
+    def extract_style_profile(self, text: str) -> dict:
+        """Analyze raw onboarding text into a style profile via Gemini."""
+        try:
+            prompt = STYLE_PROFILER_SYSTEM + "\n\n" + STYLE_PROFILER_USER.format(raw_text=text)
+            raw = self._model.generate_content(prompt).text
+        except LLMError:
+            raise
+        except Exception as e:
+            raise LLMError(f"Gemini style profile error: {e}") from e
+        return _parse_style_profile(raw)
 
     def compose_reply(
         self,
@@ -558,6 +696,22 @@ class AnthropicLLMClient(LLMClient):
         except (json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
             raise LLMValidationError(f"Failed to parse classification: {e}") from e
 
+    def extract_style_profile(self, text: str) -> dict:
+        """Analyze raw onboarding text into a style profile via Claude."""
+        try:
+            prompt = STYLE_PROFILER_SYSTEM + "\n\n" + STYLE_PROFILER_USER.format(raw_text=text)
+            response = self._client.messages.create(
+                model=self._model,
+                max_tokens=1024,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            raw = response.content[0].text
+        except LLMError:
+            raise
+        except Exception as e:
+            raise LLMError(f"Anthropic style profile error: {e}") from e
+        return _parse_style_profile(raw)
+
     def compose_reply(
         self,
         message: str,
@@ -677,6 +831,22 @@ class FallingBackLLMClient(LLMClient):
                 continue
         raise LLMError("Unexpected error in FallingBackLLMClient.classify_with_history")
 
+    def extract_style_profile(self, text: str) -> dict:
+        """Extract style profile using fallback chain."""
+        for i, client in enumerate(self._clients):
+            try:
+                result = client.extract_style_profile(text)
+                logger.info(f"FallingBackLLMClient: extract_style_profile succeeded with {type(client).__name__} (attempt {i+1}/{len(self._clients)})")
+                return result
+            except LLMValidationError:
+                raise
+            except LLMError as e:
+                logger.warning(f"FallingBackLLMClient: extract_style_profile failed with {type(client).__name__}: {e}, trying next...")
+                if i == len(self._clients) - 1:
+                    raise
+                continue
+        raise LLMError("Unexpected error in FallingBackLLMClient.extract_style_profile")
+
     def compose_reply(
         self,
         message: str,
@@ -729,6 +899,12 @@ def get_llm_client() -> LLMClient:
     """Get the primary LLM client based on configuration."""
     from app.config import get_settings
     settings = get_settings()
+    if settings.ai_router_api_key:
+        return AdaCodeLLMClient(
+            api_key=settings.ai_router_api_key,
+            base_url=settings.ai_router_base_url,
+            model=settings.ai_router_model,
+        )
     if settings.adacode_api_key:
         return AdaCodeLLMClient(
             api_key=settings.adacode_api_key,
@@ -751,11 +927,25 @@ def get_fallback_llm_client(priority_backends: list[str] | None = None) -> LLMCl
     settings = get_settings()
     clients: list[LLMClient] = []
 
-    backends = priority_backends or ["adacode", "gemini", "anthropic"]
+    backends = priority_backends or ["router", "adacode", "gemini", "anthropic"]
 
     for backend in backends:
         backend_lower = backend.lower()
-        if backend_lower == "adacode":
+        if backend_lower == "router":
+            if not settings.ai_router_api_key:
+                logger.warning("AI_ROUTER_API_KEY not set, skipping 9router")
+                continue
+            try:
+                client = AdaCodeLLMClient(
+                    api_key=settings.ai_router_api_key,
+                    base_url=settings.ai_router_base_url,
+                    model=settings.ai_router_model,
+                )
+                clients.append(client)
+                logger.info("Added 9Router client to fallback chain")
+            except Exception as e:
+                logger.warning(f"Failed to init 9Router client: {e}")
+        elif backend_lower == "adacode":
             if not settings.adacode_api_key:
                 logger.warning("ADACODE_API_KEY not set, skipping adacode")
                 continue
@@ -824,7 +1014,7 @@ class _SafeLLMClientWrapper(LLMClient):
     
     def __init__(self, wrapped: LLMClient, priority_backends: list[str] | None = None):
         self._wrapped = wrapped
-        self._priority_backends = priority_backends or ["adacode", "gemini", "anthropic"]
+        self._priority_backends = priority_backends or ["router", "adacode", "gemini", "anthropic"]
     
     def classify(self, message: str) -> ClassificationResult:
         try:
@@ -855,7 +1045,21 @@ class _SafeLLMClientWrapper(LLMClient):
                     continue
             logger.warning(f"All backends failed, using MockLLMClient")
             return MockLLMClient().classify_with_history(messages)
-    
+
+    def extract_style_profile(self, text: str) -> dict:
+        try:
+            return self._wrapped.extract_style_profile(text)
+        except LLMError as e:
+            logger.warning(f"LLM extract_style_profile failed: {e}, trying fallback backends...")
+            for backend in self._priority_backends:
+                try:
+                    alt_client = get_fallback_llm_client([backend])
+                    return alt_client.extract_style_profile(text)
+                except LLMError:
+                    continue
+            logger.warning(f"All backends failed, using MockLLMClient")
+            return MockLLMClient().extract_style_profile(text)
+
     def compose_reply(self, message: str, retrieved_row: dict | None, match_kind: str, customer_context: dict | None = None, persona: str | None = None) -> str:
         try:
             return self._wrapped.compose_reply(message, retrieved_row, match_kind, customer_context, persona)
@@ -869,6 +1073,45 @@ class _SafeLLMClientWrapper(LLMClient):
         except LLMError as e:
             logger.warning(f"LLM compose_reply_with_history failed: {e}, using MockLLMClient")
             return MockLLMClient().compose_reply_with_history(messages, message, retrieved_row, match_kind, customer_context, persona)
+
+
+def _parse_style_profile(text: str) -> dict:
+    """Parse + coerce the profiler LLM output into a valid style profile dict.
+
+    Coerces out-of-enum values to a safe default instead of rejecting the
+    whole result, so a sloppy LLM answer still yields a usable profile.
+    """
+    try:
+        match = re.search(r"\{.*\}", text, re.DOTALL)
+        data = json.loads(match.group() if match else text)
+    except (json.JSONDecodeError, AttributeError) as e:
+        raise LLMValidationError(f"Failed to parse style profile: {e}") from e
+
+    identity = data.get("identity") if isinstance(data.get("identity"), dict) else {}
+    sp = data.get("style_profile") if isinstance(data.get("style_profile"), dict) else {}
+    facts = data.get("key_facts_and_preferences") or []
+
+    def _enum(value, allowed, default):
+        return value if isinstance(value, str) and value in allowed else default
+
+    return {
+        "identity": {
+            "name": identity.get("name") or None,
+            "role": identity.get("role") or None,
+            "business_name": identity.get("business_name") or None,
+        },
+        "style_profile": {
+            "formality": _enum(sp.get("formality"), VALID_STYLE_FORMALITY, "semi-formal"),
+            "emoji_density": _enum(sp.get("emoji_density"), VALID_STYLE_EMOJI, "low"),
+            "sentence_length": _enum(sp.get("sentence_length"), VALID_STYLE_LENGTH, "concise"),
+            "tone": _enum(sp.get("tone"), VALID_STYLE_TONE, "professional_and_direct"),
+            "key_phrases": [
+                p for p in (sp.get("key_phrases") or [])
+                if isinstance(p, str) and p.strip()
+            ][:4],
+        },
+        "key_facts_and_preferences": [f for f in facts if isinstance(f, str) and f.strip()],
+    }
 
 
 __all__ = [
@@ -917,10 +1160,26 @@ def validate_reply(reply: str, source_row: dict | str | None) -> None:
             f"Reply contains numbers not in source: {sorted(invented_nums)}"
         )
 
-    # 2. Sizes — S, M, L, XL, XXL, XXXL.
-    size_pattern = r"\b(?:XXXL|XXL|XL|L|M|S)\b"
-    reply_sizes = set(re.findall(size_pattern, reply))
-    source_sizes = set(re.findall(size_pattern, source_text))
+    # 2. Sizes — S, M, L, XL, XXL, XXXL. A span like "M-XXL" expands to every
+    #    size between its endpoints, so a reply naming "size L" when the source
+    #    says "M-XXL" is accepted (L is in range, not a hallucination).
+    size_pattern = r"\b(?:XXXL|XXL|XL|L|M|S|XS)\b"
+    _SIZE_ORDER = ("XXXL", "XXL", "XL", "L", "M", "S", "XS")
+
+    def _all_sizes(text: str) -> set:
+        sizes = set(re.findall(size_pattern, text, flags=re.IGNORECASE))
+        for lo, hi in re.findall(
+            r"\b(XXXL|XXL|XL|L|M|S|XS)\s*[-–]\s*(XXXL|XXL|XL|L|M|S|XS)\b",
+            text,
+            flags=re.IGNORECASE,
+        ):
+            if lo.upper() in _SIZE_ORDER and hi.upper() in _SIZE_ORDER:
+                i, j = _SIZE_ORDER.index(lo.upper()), _SIZE_ORDER.index(hi.upper())
+                sizes |= set(_SIZE_ORDER[min(i, j): max(i, j) + 1])
+        return sizes
+
+    reply_sizes = _all_sizes(reply)
+    source_sizes = _all_sizes(source_text)
     # Only enforce if source actually mentions sizes (otherwise L may be common word).
     if source_sizes and (reply_sizes - source_sizes):
         raise LLMValidationError(

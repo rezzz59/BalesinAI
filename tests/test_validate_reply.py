@@ -30,6 +30,19 @@ def test_validate_reply_accepts_referenced_size():
     validate_reply(reply, source)
 
 
+def test_validate_reply_accepts_size_within_source_range():
+    """A reply naming 'L' is valid when the source offers 'M-XXL' — L is in range."""
+    source = {"name": "Kemeja Batik", "deskripsi": "Kemeja batik bahan katun premium, size M-XXL."}
+    validate_reply("Kemeja Batik size L warna navy ready ya Kak", source)
+
+
+def test_validate_reply_rejects_size_outside_source_range():
+    """A reply naming 'S' must be rejected when the source only offers 'M-XXL'."""
+    source = {"name": "Kemeja Batik", "deskripsi": "Kemeja batik bahan katun premium, size M-XXL."}
+    with pytest.raises(LLMValidationError):
+        validate_reply("Kemeja Batik ready size S ya Kak", source)
+
+
 def test_validate_reply_rejects_invented_stock_status():
     source = {"name": "Sepatu", "stock": "habis"}
     reply = "Stok ready ya Kak"

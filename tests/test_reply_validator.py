@@ -71,6 +71,28 @@ def test_exact_size_reference_passes():
     assert ok is True or "listener" not in msg
 
 
+def test_answering_attribute_info_is_not_violation():
+    """Naming the attribute while ANSWERING a stock/size/color question is fine;
+    only RE-ASKING it is a listener violation."""
+    ok, msg = validate_sales_style(
+        "Siap Kak! Kemeja Batik size L warna navy ready ya. 🙌 "
+        "Tersedia warna hitam dan navy ukuran M-XXL. Harganya Rp 135.000 per pcs. "
+        "Boleh dibantu nama lengkap dan alamatnya agar pesanannya bisa kami amankan?",
+        user_message="kak, kemeja batik premiumnya ready size L warna navy ada ga?",
+    )
+    assert ok is True, msg
+
+
+def test_asking_size_already_mentioned_fails():
+    """Re-asking the size the buyer already named must still be flagged."""
+    ok, msg = validate_sales_style(
+        "Sudah kami siapkan ya Kak. Kakak mau ukuran apa?",
+        user_message="Saya mau kaos oversize size M",
+    )
+    assert ok is False
+    assert "listener" in msg.lower()
+
+
 def test_one_sentence_single_emoji_ok():
     """Single emoji and one sentence passes."""
     ok, msg = validate_sales_style("Terima kasih! Mau dibantu apa lagi, Kak? 👍")

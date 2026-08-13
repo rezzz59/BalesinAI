@@ -113,7 +113,7 @@ class TestMultiTurnOrderFlow:
 
         # Turn 2: order 2 pcs
         r2 = self._simulate_message(tenant, thread, "mau kaos hitam 2 pcs", "confirm_order")
-        assert r2["order_draft"] == [{"product": "Kaos Hitam", "qty": 2, "price": 50000.0}]
+        assert r2["order_draft"] == [{"product": "Kaos Hitam", "qty": 2, "price": 50000.0, "size": None, "color": "hitam", "min_order": ""}]
         assert r2["order_total"] == 100000.0
         assert get_conversation_state(tenant, thread)["order_draft"] == r2["order_draft"]
 

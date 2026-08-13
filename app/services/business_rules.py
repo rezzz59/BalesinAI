@@ -149,9 +149,19 @@ def catering_quote(
     }
 
 
-def format_catering_reply(quote: dict, items: list[dict]) -> str:
-    """Build the buyer-facing catering confirmation/quote message."""
-    lines = [f"Order diterima — total {quote['total_porsi']} porsi 🎉", ""]
+def format_catering_reply(quote: dict, items: list[dict], confirmed: bool = False) -> str:
+    """Build the buyer-facing catering reply.
+
+    confirmed=False → consultation/quote preview (missing date or below
+    minimum), never claims the order is accepted. confirmed=True → order
+    accepted (date + minimum order satisfied).
+    """
+    header = (
+        f"Order diterima — total {quote['total_porsi']} porsi 🎉"
+        if confirmed
+        else f"Ini rincian pesanan Kakak ya 🙏"
+    )
+    lines = [header, ""]
     for it in items:
         qty = it.get("qty", 1)
         price = it.get("price")
@@ -166,6 +176,10 @@ def format_catering_reply(quote: dict, items: list[dict]) -> str:
     if quote.get("needs_date"):
         lines.append("")
         lines.append("Sebelum lanjut, tanggal acaranya kapan ya? Kami cek dulu ketersediaan jadwal dapur 🙏")
+    elif not confirmed:
+        lines.append(f"Tanggal acara: {quote['detected_date']}")
+        lines.append("")
+        lines.append("Kalau rincian ini sudah oke, boleh kami proses pesanannya ya Kak?")
     else:
         lines.append(f"Tanggal acara: {quote['detected_date']}")
         lines.append("")

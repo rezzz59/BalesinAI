@@ -303,7 +303,7 @@ def _build_llm_client() -> Any:
 
     settings = get_settings()
     priority = [settings.llm_backend] if settings.llm_backend else []
-    for extra in ("adacode", "gemini", "anthropic"):
+    for extra in ("router", "adacode", "gemini", "anthropic"):
         if extra not in priority and getattr(settings, f"{extra}_api_key", ""):
             priority.append(extra)
     return get_safe_llm_client(priority or ["gemini", "adacode"])

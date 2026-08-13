@@ -20,6 +20,12 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""
     adacode_api_key: str = ""
 
+    # 9Router (local OpenAI-compatible router) — primary backend when key set.
+    # Only usable from the local machine (localhost:20128).
+    ai_router_api_key: str = ""
+    ai_router_base_url: str = "http://localhost:20128/v1"
+    ai_router_model: str = "kr/deepseek-3.2"
+
     # Optional base URL for AdaCode (default: https://api.adacode.ai)
     adacode_base_url: str | None = None
     # Optional model override (default: claude-sonnet-4-6)

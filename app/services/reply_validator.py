@@ -21,21 +21,37 @@ def _count_emojis(text: str) -> int:
 
 
 def _listener_violations(reply: str, user_message: str = "") -> list:
-    """Detect when the reply asks about something already mentioned in user message."""
+    """Detect when the reply RE-ASKS an already-mentioned attribute.
+
+    Only an OPEN question that asks the buyer to specify an attribute they
+    already named (e.g. "mau ukuran apa?") is a violation. Confirming the
+    exact chosen variant ("mau kami amankan stock size L navy?") or stating
+    the attribute while answering ("tersedia warna navy dan hitam") is
+    legitimate. 'ukuran'/'size' count as one attribute family.
+    """
     if not user_message:
         return []
     reply_lower = reply.lower()
     user_lower = user_message.lower()
 
-    violations = []
-    # Common attribute-asking patterns
-    if "ukuran" in user_lower and "ukuran" in reply_lower:
-        violations.append("asked about size already mentioned in user message")
-    if "warna" in user_lower and "warna" in reply_lower:
-        violations.append("asked about color already mentioned in user message")
-    if "size" in user_lower and "size" in reply_lower:
-        violations.append("asked about size already mentioned in user message")
-    return violations
+    _ATTR_SYNONYMS = {"size": ("ukuran", "size"), "warna": ("warna",)}
+    mentioned = {
+        fam for fam, words in _ATTR_SYNONYMS.items()
+        if any(w in user_lower for w in words)
+    }
+    if not mentioned:
+        return []
+
+    open_q = re.compile(r"\b(apa|gimana|bagaimana|mana|berapa)\b")
+    violations = set()
+    for m in re.finditer(r"[^.!?]*\?", reply_lower):
+        sentence = m.group(0)
+        if not open_q.search(sentence):
+            continue
+        for fam in mentioned:
+            if any(w in sentence for w in _ATTR_SYNONYMS[fam]):
+                violations.add(f"asked about {fam} already mentioned in user message")
+    return sorted(violations)
 
 
 def _count_questions(text: str) -> int:

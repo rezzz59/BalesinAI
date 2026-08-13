@@ -22,6 +22,7 @@ from app.db.tenant_repo import (
     get_tenant,
     insert_or_update_tenant,
     update_device_status,
+    update_onboarding_data,
     update_onboarding_status,
     update_tier,
 )
@@ -211,6 +212,38 @@ async def onboard_status(request: Request):
         "fonnte_device_id": tenant["fonnte_device_id"],
         "owner_wa_number": tenant["owner_wa_number"],
     }
+
+
+@router.post("/style")
+async def extract_style(request: Request):
+    """Analyze raw onboarding text into identity + style profile.
+
+    Body: {raw_onboarding_text} — typically a paste of the merchant's own
+    WhatsApp replies. The extracted profile is merged into onboarding_data
+    under style_profile so compose replies can imitate the merchant's tone.
+    Never blocks onboarding: on any LLM failure a conservative default is
+    stored instead of failing the request.
+    """
+    user = current_user(request)
+    tenant = _user_tenant(user)
+    body = await request.json()
+    raw_text = (body.get("raw_onboarding_text") or "").strip()
+    if not raw_text:
+        raise HTTPException(status_code=400, detail="raw_onboarding_text wajib diisi.")
+
+    from app.services.llm import get_safe_llm_client
+
+    profile = get_safe_llm_client().extract_style_profile(raw_text)
+
+    import json as _json
+
+    try:
+        existing = _json.loads(tenant["onboarding_data"] or "{}")
+    except (ValueError, TypeError):
+        existing = {}
+    existing["style_profile"] = profile
+    update_onboarding_data(tenant["tenant_id"], existing)
+    return {"status": "ok", **profile}
 
 
 @router.post("/live")

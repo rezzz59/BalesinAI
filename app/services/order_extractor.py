@@ -25,6 +25,22 @@ _ADDRESS_PATTERNS = [
     re.compile(r"(?:alamat|kirim\s+ke|di\s+kirim\s+ke|antar\s+ke|lokasi)\s*:?\s*(.{3,90})"),
 ]
 
+# Tokens that carry no product signal when matching buyer phrasing to catalog
+# names (order verbs, polite filler, quantity units, attribute labels).
+_STOP_TOKENS = {
+    "saya", "aku", "mau", "beli", "pesan", "order", "ya", "kak", "dong", "tolong",
+    "lagi", "pcs", "porsi", "buah", "biji", "unit", "orang", "buat", "untuk",
+    "warna", "ukuran", "size", "kotak", "paket", "saja", "dong", "gimana", "berapa",
+}
+# Attribute tokens that must NOT be consumed as product words (size/color labels).
+_ATTR_TOKENS = {"hitam", "putih", "navy", "biru", "merah", "abu", "krem", "coklat",
+                "cokelat", "hijau", "ungu", "pink", "cream", "maroon", "kuning",
+                "orange", "s", "m", "l", "xl", "xxl", "xxxl", "xs"}
+
+_SIZE_RE = re.compile(r"\b(?:size|ukuran|sz)\s*[:=]?\s*(xxxl|xxl|xl|l|m|s|xs)\b", re.IGNORECASE)
+_COLORS = ("hitam", "putih", "navy", "biru", "merah", "abu", "krem", "coklat",
+           "cokelat", "hijau", "ungu", "pink", "cream", "maroon", "kuning", "orange", "toska")
+
 
 def _normalize(s: str) -> str:
     return re.sub(r"\s+", " ", (s or "").strip().lower())
@@ -68,6 +84,16 @@ def _find_quantity(message: str, product_name: str) -> int:
     m = re.search(r"(\d{1,3})[^a-z]{0,5}" + name, message, flags=re.IGNORECASE)
     if m:
         return int(m.group(1))
+    # Token fallback (partial/phrase matches): qty adjacent to a meaningful
+    # token of the product name, e.g. "2 kaos" in "mau beli 2 kaos oversize
+    # hitam" matching "Kaos Oversize Cotton - Hitam".
+    for token in sorted(_name_tokens(_normalize(product_name)), key=len, reverse=True):
+        m = re.search(r"(\d{1,3})[^a-z]{0,4}" + re.escape(token), message, flags=re.IGNORECASE)
+        if m:
+            return int(m.group(1))
+        m = re.search(re.escape(token) + r"[^0-9]{0,4}(\d{1,3})", message, flags=re.IGNORECASE)
+        if m:
+            return int(m.group(1))
     return 1
 
 
@@ -79,6 +105,10 @@ def _match_products(message: str, catalog: list[dict]) -> list[dict]:
     "Kaos Oversize Crop - Hitam - Size L" via its family "Kaos Oversize Crop".
     Each row is only claimed once, longest-name-first so "Kaos Oversize Crop"
     wins over a bare "Kaos".
+
+    When no exact/family match is found, falls back to token-overlap scoring so
+    buyer phrasing like "kaos oversize hitam" matches a catalog row named
+    "Kaos Oversize Cotton - Hitam" (shared tokens: kaos, oversize, hitam).
     """
     msg = _normalize(message)
     if not msg:
@@ -108,26 +138,77 @@ def _match_products(message: str, catalog: list[dict]) -> list[dict]:
             # Family match — claim the family so a generic "kaos" doesn't also claim it.
             claimed.add(family)
             matched.append(row)
-        elif family and family in msg and len(family) >= 3:
-            # Family match — claim the family so a generic "kaos" doesn't also claim it.
-            claimed.add(family)
-            matched.append(row)
+
+    # Token-overlap fallback for unmatched messages (partial phrasing).
+    if not matched:
+        msg_tokens = _name_tokens(msg)
+        if msg_tokens:
+            scored: list[tuple[float, int, dict]] = []
+            for idx, row in enumerate(rows):
+                name = row["nama_produk"].strip()
+                key = _normalize(name)
+                if key in claimed:
+                    continue
+                name_tokens = _name_tokens(_normalize(name.split(" - ")[0]))
+                if not name_tokens:
+                    continue
+                overlap = len(msg_tokens & name_tokens)
+                score = overlap / len(name_tokens)
+                if overlap >= 1 and score >= 0.5:
+                    scored.append((score, -idx, row))
+            for _, _, row in sorted(scored, key=lambda t: (t[0], t[1]), reverse=True):
+                key = _normalize(row["nama_produk"].strip())
+                if key in claimed:
+                    continue
+                claimed.add(key)
+                matched.append(row)
     return matched
 
 
+def _name_tokens(text: str) -> set[str]:
+    """Meaningful tokens in a product name/phrase (stopwords and pure
+    size/color/attribute labels excluded so they can't over-match)."""
+    tokens = {w for w in re.findall(r"[a-z0-9]{2,}", text)}
+    return {t for t in tokens if t not in _STOP_TOKENS and t not in _ATTR_TOKENS}
+
+
+def extract_size_color(message: str) -> tuple[str | None, str | None]:
+    """Pull (size, color) from a free-text order message.
+
+    Size accepts "size L", "ukuran M", "sz xxl". Color matches a known
+    Indonesian color word anywhere in the message ("warna navy", "kaos hitam").
+    Returns (None, None) when absent.
+    """
+    size = None
+    m = _SIZE_RE.search(message or "")
+    if m:
+        size = m.group(1).upper()
+    color = None
+    lower = (message or "").lower()
+    for c in _COLORS:
+        if re.search(rf"\b{c}\b", lower):
+            color = c
+            break
+    return size, color
+
+
 def extract_items(message: str, catalog: list[dict]) -> list[dict]:
-    """Extract [{product, qty, price}] from a confirm_order message.
+    """Extract [{product, qty, price, size, color}] from a confirm_order message.
 
     price is the catalog's unit price (float) or None when unparseable; qty
-    defaults to 1. If no catalog row matches, returns [] (caller decides the
-    fallback reply).
+    defaults to 1; size/color are best-effort from the message text. If no
+    catalog row matches, returns [] (caller decides the fallback reply).
     """
     items: list[dict] = []
+    size, color = extract_size_color(message)
     for row in _match_products(message, catalog):
         name = (row.get("nama_produk") or "").strip()
         qty = _find_quantity(message, name)
         price = _parse_price(row.get("harga"))
-        items.append({"product": name, "qty": qty, "price": price})
+        items.append({
+            "product": name, "qty": qty, "price": price, "size": size, "color": color,
+            "min_order": row.get("min_order") or "",
+        })
     return items
 
 

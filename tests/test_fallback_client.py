@@ -254,6 +254,7 @@ def test_get_fallback_llm_client_unknown_backend_fallback():
 def test_get_fallback_llm_client_empty_list_fallback(monkeypatch):
     """Factory falls back to MockLLMClient if no backends are provided."""
     import os
+    monkeypatch.setenv("AI_ROUTER_API_KEY", "")
     monkeypatch.setenv("ADACODE_API_KEY", "")
     monkeypatch.setenv("GEMINI_API_KEY", "")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "")
