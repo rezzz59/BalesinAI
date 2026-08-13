@@ -1,142 +1,107 @@
-# Balesin.ai — AI Asisten WhatsApp untuk UMKM (Cekat AI Parity)
+# Balesin.ai — Intelligent WhatsApp Assistant for SMEs
 
-AI agent berbasis LangGraph yang menjawab chat WhatsApp pelanggan dengan gaya bahasa spesifik toko, menangkap pesanan otomatis, mendukung RAG Hybrid, Anti-Ghosting, dan menyerahkan ke *owner* (fallback) bila obrolan di luar konteks.
-
-> **Fokus pengembangan saat ini: 2 vertikal bisnis + platformnya sendiri.**
-> Jangan menambah vertikal baru di luar itu tanpa keputusan eksplisit.
+**Balesin.ai** adalah platform *Customer Service* dan *Sales Automation* berbasis AI yang dirancang khusus untuk UMKM Indonesia. Ditenagai oleh arsitektur **LangGraph**, Balesin.ai mampu menangani interaksi pelanggan di WhatsApp layaknya agen manusia profesional—mengerti konteks percakapan, menangkap detail pesanan otomatis, mendukung pencarian basis pengetahuan, dan menjaga prospek agar tidak hilang (*anti-ghosting*).
 
 ---
 
-## Fitur Unggulan (Arsitektur Setara SaaS Enterprise)
+## 🌟 Fitur Utama
 
-BalesinAI memiliki arsitektur cerdas yang mengadopsi fungsionalitas terbaik dari platform *Customer Service* level Enterprise (seperti Cekat AI) dengan implementasi yang efisien (*Ponytail mode*):
+Balesin.ai menghadirkan kemampuan setara platform SaaS *Enterprise* ke dalam ekosistem UMKM dengan arsitektur yang ringan dan efisien:
 
-1. **Dynamic Merchant Prompt (AI Behavior)**
-   Merchant dapat menyuntikkan instruksi khusus (misal: *"Gunakan sapaan Sis/Bro, dan tawarkan diskon jika order 2 pcs"*) langsung ke otak AI via Dashboard. AI akan otomatis menyesuaikan diri tanpa merusak *guardrails* anti-halusinasi inti.
-2. **Unstructured Knowledge Text (SOP Bebas / RAG)**
-   AI tidak hanya membaca tabel Excel kaku. Merchant bisa mencantumkan teks panjang (contoh: "Jam operasional kami Senin-Sabtu 09.00-17.00. Kami menerima retur dengan syarat video unboxing."). AI akan menjawab pertanyaan layaknya agen manusia berdasarkan RAG (*Retrieval-Augmented Generation*).
-3. **Unified Hybrid Search (Cross-search FAQ & Katalog)**
-   Ketika pengguna bertanya *"Berapa harga kemeja?"* (Intent: FAQ), AI secara pintar akan memindai *Katalog Produk* jika data tidak ditemukan di FAQ sheet.
-4. **Welcome Message Otomatis**
-   Sapaan terformat yang dikirimkan kepada prospek/pelanggan baru pada detik pertama mereka mengirimkan pesan.
-5. **AI Auto Follow-up (Anti-Ghosting)**
-   Tugas latar belakang (*background loop* di FastAPI) yang memindai percakapan yang "menggantung". Jika prospek tidak membalas selama $X$ menit, AI secara proaktif dan ramah akan mengirim pesan *follow-up* (misal: "Halo Kak, apakah ada yang bisa kami bantu kembali?").
-6. **Order Flow Templates**
-   Saat pengguna mengetik pesanan yang datanya tidak lengkap, AI otomatis menyodorkan *template* isian (Nama, Ukuran, Warna, Alamat, Tanggal) secara presisi alih-alih hanya berbalas pesan secara acak.
+- **Adaptive AI Persona:** *Merchant* dapat mengatur sendiri gaya bahasa AI (misal: menggunakan sapaan "Sis/Bro") langsung melalui Dashboard. AI akan beradaptasi tanpa melanggar batasan sistem (*guardrails*).
+- **Hybrid RAG Knowledge Base:** AI tidak hanya membaca tabel data terstruktur, tetapi juga dapat memproses teks SOP bebas (aturan garansi, jam buka, dll) menggunakan *Retrieval-Augmented Generation* untuk menjawab pertanyaan spesifik dengan akurat.
+- **Smart Order Extraction:** Saat pengguna ingin membeli namun datanya kurang lengkap, AI secara otomatis menyodorkan *template* isian (Nama, Ukuran, Warna, Alamat) secara interaktif.
+- **Automated Anti-Ghosting (Follow-up):** Rutinitas otomatis di latar belakang yang memantau percakapan tertunda. Jika prospek tidak membalas dalam durasi tertentu, AI akan mengirim pesan *follow-up* yang ramah.
+- **Human Handoff (Fallback):** Ketika AI mendeteksi keluhan (*complaint*), keberatan (*objection*), atau pertanyaan di luar konteks toko, percakapan akan langsung diteruskan ke nomor WhatsApp pemilik bisnis.
 
 ---
 
-## Prioritas Vertikal Bisnis
+## 💼 Dukungan Vertikal Bisnis
 
-### 1. Katering / Kuliner (`business_type: "kuliner"`)
-Alur paling lengkap — hitungan pesanan **deterministik, tanpa LLM** agar angka
-tidak pernah mengarang.
+Balesin.ai saat ini dioptimalkan untuk dua sektor vertikal utama dengan logika bisnis bawaan:
 
-| Kemampuan | Lokasi |
-|-----------|--------|
-| Kuotasi catering: subtotal + ongkir + DP 50% + minimal porsi + tanggal acara | `app/services/business_rules.py` |
-| LLM Enforces Contextual Rules (Minimal porsi ditangani dengan human-like) | `app/graph/nodes.py` (via LLM) |
-| Ongkir per wilayah dari sheet `Ongkir` | `find_ongkir` + `local_data_repo` |
-| Balasan kuotasi terformat ke pembeli | `format_catering_reply` |
-| Pesanan tanpa tanggal acara **tidak dipersist** (draft sampai jadwal dapur dikonfirmasi) | `capture_order` di `app/graph/nodes.py` |
+### 1. Kuliner & Katering (`kuliner`)
+Alur percakapan berfokus pada ketepatan perhitungan dan manajemen pesanan dalam skala besar.
+- **Deterministik:** Perhitungan subtotal, ongkos kirim berdasarkan wilayah, DP 50%, dan batas pemesanan minimum divalidasi secara matematis di luar LLM.
+- **Context-Aware Enforcement:** Jika pelanggan memesan di bawah batas minimum, AI akan dengan ramah menyarankan penambahan porsi.
 
-Aturan emas: semua matematika kuotasi bersumber dari katalog + sheet ongkir.
-LLM hanya untuk gaya bicara, bukan menghitung angka.
-
-### 2. Fashion / Pakaian (`business_type: "fashion"`)
-Cek stok, ukuran, warna, dan pemesanan item katalog.
-
-| Kemampuan | Lokasi |
-|-----------|--------|
-| Lookup produk + cek stok/ukuran/warna | `lookup_catalog` di `app/graph/nodes.py` |
-| Ukuran dalam rentang ("M-XXL") — reply "size L" dianggap valid | `validate_reply` di `app/services/llm.py` |
-| List produk ready per keluarga (browse) | `_format_browse_reply` |
-| Order Template Incomplete Input | `_format_order_consultation` |
-
-Aturan emas: harga, ukuran, warna, stok **harus verbatim dari source row**.
-Validator anti-halusinasi (`validate_reply`) menolak reply yang mengarang angka/ukuran/stok di luar data.
-
-### 3. Platform Inti (Balesin.ai)
-Layaknya SaaS CS Chatbot:
-
-- **Multi-tenant** — tiap toko = tenant dengan data lokal sendiri (SQLite).
-- **Onboarding self-service** — `app/api/onboard.py`: buat tenant → upload XLSX (FAQ + katalog) → Set Custom Behavior / Welcome Msg / Followup → hubungkan WhatsApp (QR Fonnte) → live.
-- **Frontend Dashboard** — Terletak di `static/dashboard.html` memuat metrik bisnis, pengatur *behavior*, *knowledge base*, *welcome message*, dan konfigurasi *Anti-Ghosting*.
-- **Style Profiler** — `POST /api/onboard/style` menganalisis teks onboarding
-  owner dan menyimpan profil gaya bicara ke `onboarding_data.style_profile`.
-- **Persona per vertikal** — `PERSONA_TEMPLATES` di `app/graph/prompts.py`
-  (`jualan`, `klinik`, `kuliner`, `fashion`, `saas`).
+### 2. Fashion & Retail (`fashion`)
+Alur percakapan berfokus pada ketersediaan varian produk.
+- **Verbatim Variant Validation:** Ketersediaan stok, ukuran (contoh: rentang "M-XXL"), dan warna diverifikasi langsung dari katalog. AI tidak diizinkan menciptakan varian fiktif.
+- **Visual Engagement:** Dukungan untuk mengirimkan katalog dan foto produk langsung ke WhatsApp pelanggan (pada *tier* langganan pro).
 
 ---
 
-## Alur Percakapan (Graph)
+## ⚙️ Arsitektur & Teknologi
 
-```
-WhatsApp → /webhook → classify_intent → lookup_catalog → analyze_context → compose_reply
-       (Background) └─ auto_followup                      (fallback_human) └─ confirm_order → capture_order
+Sistem dibangun dengan prinsip modularitas dan latensi rendah.
+
+- **Framework Inti:** FastAPI (Backend), LangGraph (Stateful AI Routing).
+- **Database:** SQLite (Manajemen *Tenant*, Katalog, Order, Log Percakapan).
+- **LLM Gateway:** Ekosistem Multi-LLM (Mendukung integrasi AdaCode, Gemini, Anthropic) dengan fitur *streaming* dan penanganan *failover* otomatis.
+- **Komunikasi Pesan:** Integrasi *Webhook* dengan *provider* WhatsApp (Fonnte).
+- **Background Tasks:** Sistem *sweep loop* *asynchronous* yang ringan di dalam FastAPI untuk *task* terjadwal (seperti fitur *Anti-Ghosting*).
+
+### Alur Representasi Graph (LangGraph)
+```text
+WhatsApp Webhook → Intent Classification → Catalog/Knowledge Lookup → Context Analysis → Compose Reply
+                        (Auto-Followup)                                (Fallback)      (Order Capture)
 ```
 
-- Intent: `faq` | `check_product` | `confirm_order` | `unclear` | `auto_followup`
-- `compose_reply` memakai: source row (fakta verbatim) + persona vertikal + GAYA BICARA TOKO + Custom Behavior merchant.
-- Validasi balasan: `validate_reply` (anti-halusinasi) dan `validate_sales_style` (ramah, human-touch, CS expert, anti-sycophancy, wajib tanya 1 pertanyaan pemandu).
+---
+
+## 🚀 Panduan Instalasi (Quick Start)
+
+### Persyaratan Sistem
+- Python 3.10 atau lebih baru.
+- Kredensial API LLM (disarankan menggunakan 9Router / AdaCode).
+
+### Langkah Instalasi
+
+1. **Kloning dan Persiapkan *Environment***
+   ```bash
+   python -m venv .venv
+   source .venv/bin/activate
+   pip install -e ".[dev]"
+   ```
+
+2. **Konfigurasi Environment**
+   Salin berkas konfigurasi dan isi kunci API yang diperlukan.
+   ```bash
+   cp .env.example .env
+   ```
+
+3. **Jalankan Layanan**
+   Jalankan server menggunakan skrip yang telah disediakan (mencakup Uvicorn dan *routing* lokal jika menggunakan Ngrok).
+   ```bash
+   ./start.sh
+   ```
+   *Atau jalankan secara manual:* `uvicorn app.main:app --reload --port 8000`
+
+4. **Akses Dashboard**
+   Buka `http://localhost:8000/dashboard` di peramban Anda untuk mengatur *AI Behavior*, Katalog, dan *Welcome Message*.
 
 ---
 
-## Quick Start
+## 🧪 Pengujian (Testing)
+
+Proyek ini dilengkapi dengan cakupan *Unit Test* dan *End-to-End Test* ekstensif untuk menjaga stabilitas produksi.
 
 ```bash
-python -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"
+# Menjalankan seluruh test suite
+pytest -q
 
-cp .env.example .env   # isi LLM_BACKEND + API KEYS (9Router / AdaCode direkomendasikan)
-```
-
-Jalankan server (Uvicorn + Background Task):
-
-```bash
-./start.sh
-# Atau secara manual:
-# uvicorn app.main:app --reload --port 8000
-```
-
-Dashboard Merchant (Pengaturan UI): `http://localhost:8000/dashboard`
-Webhook WhatsApp: `POST http://localhost:8000/webhook`
-
-## Testing
-
-Proyek ini diproteksi oleh 345+ passing Unit Tests.
-
-```bash
-pytest -q                 # seluruh suite (100% Passed)
-pytest tests/test_graph.py              # alur routing graph
-pytest tests/test_reply_validator.py    # aturan gaya balasan
-```
-
-## Arsitektur Singkat
-
-```
-app/
-├── main.py                 # FastAPI, auth, webhook, Auto-Followup (Background Task)
-├── api/                    # onboard (self-service), provision, auth
-├── graph/
-│   ├── graph.py            # StateGraph build + routing (termasuk rute auto_followup)
-│   ├── nodes.py            # classify, lookup, compose, order, fallback
-│   ├── prompts.py          # semua prompt LLM, Framework CS Ahli, Anti-Sycophancy
-│   └── context_analyzer.py 
-├── services/
-│   ├── llm.py              # klien LLM + Streaming SSE handler
-│   ├── followup.py         # Loop worker untuk fitur Anti-Ghosting (Phase 4)
-│   ├── business_rules.py   # Aturan domain (determinism order kuliner/fashion)
-│   ├── reply_validator.py  # Validasi gaya balasan
-│   ├── semantic_search.py  # Cari FAQ/produk semantik
-│   └── fonnte.py           # gateway WhatsApp
-└── db/                     # SQLite: tenant, user, katalog, order, chat log
+# Menjalankan spesifik test module
+pytest tests/test_graph.py              # Menguji alur percakapan dan state machine
+pytest tests/test_reply_validator.py    # Menguji kepatuhan gaya bahasa AI
+pytest tests/test_validate_reply.py     # Menguji fitur Anti-Halusinasi
 ```
 
 ---
 
-## Aturan Kontribusi (The Ponytail Rule)
+## 🤝 Pedoman Kontribusi
 
-- **Do Not Over-engineer**: Skala prioritas harus selalu mencari solusi termudah, asli (`native`), dan tidak menambah tumpukan kode yang rumit. (Contoh: Pekerjaan asinkron *cron* digantikan dengan *loop sweep* yang ringan di dalam `app.main`).
-- **Angka = data, bukan LLM.** Semua harga/ongkir/DP/min-order harus dari baris sumber (*source row*).
-- **Test What Matters**: Setiap logika esensial (seperti validasi *min-order* katering dan transisi *graph*) wajib meninggalkan *test suite* yang dapat dijalankan secara sinkron maupun asinkron.
+Balesin.ai dibangun dengan prinsip efisiensi yang tinggi. Bila Anda ingin berkontribusi, harap patuhi panduan berikut:
+- **Prioritaskan Kesederhanaan (KISS):** Gunakan fungsi bawaan platform selama memungkinkan sebelum menambahkan dependensi pihak ketiga atau infrastruktur yang berat.
+- **Pemisahan Logika:** Semua angka krusial (harga, diskon, ongkir) harus bersumber langsung dari baris data terstruktur (*source row*). LLM hanya bertugas merangkai kata.
+- **Test-Driven:** Setiap perubahan yang menyentuh logika *routing*, validasi order, atau transisi *state* wajib disertai dengan pembaruan pada *test suite*.
