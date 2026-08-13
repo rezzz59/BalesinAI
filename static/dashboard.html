@@ -427,14 +427,41 @@
 
     <!-- ============ VIEW: Pengaturan ============ -->
     <div id="view-settings" class="hidden">
-      <div class="grid2-eq">
+      <div class="grid2-eq mb-4">
         <div class="card card-pad">
-          <div class="card-title">Toko</div>
+          <div class="card-title">Profil Toko</div>
           <div id="settingsBody" class="metric-stack"></div>
         </div>
         <div class="card card-pad">
           <div class="card-title">Kesehatan Bot</div>
           <div id="settingsBot" class="metric-stack"></div>
+        </div>
+      </div>
+      
+      <!-- AI Agent Config -->
+      <div class="card card-pad">
+        <div class="card-title">Konfigurasi AI Agent</div>
+        <div class="metric-stack mt-4">
+          <div style="margin-bottom: 1rem;">
+            <label class="font-medium text-sm block mb-1">Welcome Message</label>
+            <p class="text-xs text-mute mb-2">Pesan yang otomatis dikirim pertama kali kepada pelanggan baru.</p>
+            <textarea id="inp-welcome" class="input w-100" rows="2" placeholder="Halo Kak! Selamat datang di toko kami..."></textarea>
+            <button class="btn btn-sm mt-2" onclick="saveSetting('welcome', 'inp-welcome')">Simpan</button>
+          </div>
+          
+          <div style="margin-bottom: 1rem;">
+            <label class="font-medium text-sm block mb-1">AI Agent Behavior (Aturan Khusus)</label>
+            <p class="text-xs text-mute mb-2">Atur gaya bicara atau aturan operasional AI (misal: "Gunakan sapaan Sis/Bro", "Tawarkan diskon jika beli 2").</p>
+            <textarea id="inp-behavior" class="input w-100" rows="3" placeholder="Gaya bahasa santai..."></textarea>
+            <button class="btn btn-sm mt-2" onclick="saveSetting('behavior', 'inp-behavior')">Simpan</button>
+          </div>
+          
+          <div style="margin-bottom: 1rem;">
+            <label class="font-medium text-sm block mb-1">Knowledge Source (SOP / FAQ Tambahan)</label>
+            <p class="text-xs text-mute mb-2">Informasi bebas seperti kebijakan garansi, jam buka, atau promosi yang bisa dibaca AI tanpa harus di-upload via Excel.</p>
+            <textarea id="inp-knowledge" class="input w-100" rows="4" placeholder="Jam operasional kami Senin-Sabtu 09.00-17.00..."></textarea>
+            <button class="btn btn-sm mt-2" onclick="saveSetting('knowledge', 'inp-knowledge')">Simpan</button>
+          </div>
         </div>
       </div>
     </div>
@@ -722,17 +749,61 @@ async function loadSettings() {
   const rt = (d && d.readiness) || {};
   const metric = (k,v) => '<div class="metric"><span class="m-label">' + k + '</span><span class="m-val num">' + esc(String(v ?? "-")) + '</span></div>';
   const bt = { "jualan":"Toko Online / Umum", "kuliner":"Kuliner / Makanan", "fashion":"Fashion / Pakaian", "klinik":"Klinik / Kesehatan" };
+  
   document.getElementById("settingsBody").innerHTML =
     metric("Jenis usaha", bt[s.business_type] || s.business_type) +
     metric("Nomor WA owner", s.owner_wa_number) +
     metric("Status bot", s.onboarding_status) +
     metric("Google Sheet", s.google_sheet_id ? (s.google_sheet_id.slice(0,18) + "…") : "-");
+    
   document.getElementById("settingsBot").innerHTML =
     metric("Skor kesiapan", (rt.score != null ? rt.score + "/100" : "-")) +
     metric("Pesan dibalas bot", rt.containment_rate != null ? Math.round(rt.containment_rate*100) + "%" : "-") +
     metric("Jumlah fallback", rt.fallbacks ?? "-") +
     metric("Pertanyaan golden terjawab", rt.golden_hits ?? "-");
+
+  // Populate AI config fields
+  if(document.getElementById("inp-welcome")) document.getElementById("inp-welcome").value = s.welcome_message || "";
+  if(document.getElementById("inp-behavior")) document.getElementById("inp-behavior").value = s.custom_behavior || "";
+  if(document.getElementById("inp-knowledge")) document.getElementById("inp-knowledge").value = s.knowledge_text || "";
 }
+
+async function saveSetting(type, inputId) {
+  const val = document.getElementById(inputId).value;
+  const btn = document.querySelector(`#${inputId} + button`);
+  const oldText = btn.innerText;
+  
+  btn.innerText = "Menyimpan...";
+  btn.disabled = true;
+  
+  try {
+    let payload = {};
+    if (type === "welcome") payload = { welcome_message: val };
+    else if (type === "behavior") payload = { behavior: val };
+    else if (type === "knowledge") payload = { knowledge_text: val };
+    
+    const r = await fetch(`/api/onboard/${type}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    
+    if(!r.ok) throw new Error("Gagal menyimpan");
+    
+    btn.innerText = "Tersimpan ✓";
+    btn.classList.add("btn-outline");
+    setTimeout(() => {
+      btn.innerText = oldText;
+      btn.classList.remove("btn-outline");
+      btn.disabled = false;
+    }, 2000);
+  } catch(e) {
+    alert("Gagal menyimpan: " + e.message);
+    btn.innerText = oldText;
+    btn.disabled = false;
+  }
+}
+
 </script>
 </body>
 </html>

@@ -204,6 +204,12 @@ async def onboard_status(request: Request):
     if not user.tenant_id:
         return {"status": "no_tenant", "tenant_id": None}
     tenant = _user_tenant(user)
+    import json
+    try:
+        onboarding_data = json.loads(tenant["onboarding_data"] or "{}")
+    except Exception:
+        onboarding_data = {}
+
     return {
         "tenant_id": tenant["tenant_id"],
         "status": tenant["onboarding_status"],
@@ -212,6 +218,9 @@ async def onboard_status(request: Request):
         "catalog_count": len(local_data_repo.session_catalog(tenant["tenant_id"])),
         "fonnte_device_id": tenant["fonnte_device_id"],
         "owner_wa_number": tenant["owner_wa_number"],
+        "custom_behavior": onboarding_data.get("custom_behavior", ""),
+        "knowledge_text": onboarding_data.get("knowledge_text", ""),
+        "welcome_message": onboarding_data.get("welcome_message", ""),
     }
 
 

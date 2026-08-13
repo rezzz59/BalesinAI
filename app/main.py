@@ -705,17 +705,23 @@ async def dashboard_settings_endpoint(request: Request, tenant_id: str = ""):
     readiness = None
     try:
         import json as _json
-        readiness = _json.loads(record.get("onboarding_data") or "{}").get("readiness")
+        onboarding_data = _json.loads(record.get("onboarding_data") or "{}")
+        readiness = onboarding_data.get("readiness")
     except Exception:
+        onboarding_data = {}
         readiness = None
+        
+    safe_settings = {
+        "business_type": record.get("business_type"),
+        "owner_wa_number": record.get("owner_wa_number"),
+        "onboarding_status": record.get("onboarding_status"),
+        "google_sheet_id": record.get("google_sheet_id"),
+        "custom_behavior": onboarding_data.get("custom_behavior", ""),
+        "knowledge_text": onboarding_data.get("knowledge_text", ""),
+        "welcome_message": onboarding_data.get("welcome_message", ""),
+    }
     return {
         "tenant_id": tenant,
-        "settings": {
-            "business_type": record.get("business_type"),
-            "owner_wa_number": record.get("owner_wa_number"),
-            "onboarding_status": record.get("onboarding_status"),
-            "google_sheet_id": record.get("google_sheet_id"),
-            "payment_provider": record.get("payment_provider"),
-        },
+        "settings": safe_settings,
         "readiness": readiness,
     }
