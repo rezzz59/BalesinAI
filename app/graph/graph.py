@@ -65,6 +65,8 @@ def route_after_classify(state: ChatState) -> str:
     """Route after classify_intent node. Sets fallback_reason if routing to fallback."""
     if state.get("intent") == "auto_followup":
         return "compose_reply"
+    if state.get("intent") == "cancel_order":
+        return "compose_reply"
     if should_fallback(state):
         # Populate fallback_reason so fallback_human sees it.
         # We mutate state via a no-op return — langgraph's conditional edge

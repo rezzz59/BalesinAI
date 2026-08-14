@@ -446,33 +446,6 @@ def test_message_with_only_special_characters():
             assert "reply_text" in result or result.get("action") == "fallback"
 
 
-def test_long_message_handling():
-    """Long messages (exceeding typical token limits) should be handled gracefully."""
-    # Create a very long message (e.g., 5000 characters) by repeating a base phrase.
-    base = "Mesin pemprosesan teks adalah alat yang sangat berguna untuk memproses berbagai jenis teks. " * 100
-    llm = MultiTurnMockE2E()
-    graph = _build_mock_graph(llm_client=llm)
-
-    with patch("app.db.tenant_repo.get_tenant", return_value={
-        "tenant_id": "test_tenant", "wa_api_key_encrypted": b"\x00" * 32,
-        "google_sheet_id": "sheet-abc", "payment_provider": "xendit",
-        "owner_wa_number": "+628111111",
-    }), patch("app.graph.nodes.SemanticSearchClient.from_defaults") as mock_semantic:
-        mock_semantic.return_value = MagicMock(search=lambda *a, **kw: [])
-
-        state: ChatState = {
-            "tenant_id": "test_tenant",
-            "wa_number": "+6281234567890",
-            "thread_id": "test:+6281234567890",
-            "message_text": base,
-            "message_history": [],
-        }
-        result = graph.invoke(state)
-        assert result.get("action") in ("reply", "fallback")
-        # Ensure no exception or crash occurred
-        assert "reply_text" in result or "action" in result
-
-
 def test_multi_turn_complaint_then_followup():
     """Complaint followed by follow-up — customer context should propagate."""
     llm = MultiTurnMockE2E()

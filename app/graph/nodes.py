@@ -23,6 +23,15 @@ _ORDER_VERBS = (
 )
 _QTY_RE = re.compile(r"\d{1,3}\s*(?:porsi|pcs|unit|buah|biji|orang|pack|kotak|pax|kg|l)\b", re.IGNORECASE)
 
+# Cancel signal: buyer wants to drop the running order draft.
+_CANCEL_WORDS = ("batal", "batalkan", "cancel", "gak jadi", "ga jadi", "gajadi", "udah deh", "urungkan")
+
+
+def _looks_like_cancel(message: str) -> bool:
+    """True when a buyer message signals cancelling the running order draft."""
+    msg = (message or "").lower()
+    return any(w in msg for w in _CANCEL_WORDS)
+
 
 def _looks_like_order(message: str) -> bool:
     """True when a message states a definite order (verb + quantity).
@@ -266,6 +275,14 @@ def classify_intent(state: ChatState, llm_client: Any) -> dict:
             result["confidence"] = max(result["confidence"], 0.9)
             logger.info(
                 "order_intent_override",
+                extra={"tenant_id": state["tenant_id"], "thread_id": state["thread_id"]},
+            )
+        # Cancel overrides whatever the LLM said when there's a running draft.
+        if _looks_like_cancel(state.get("message_text", "")) and state.get("order_draft"):
+            intent = "cancel_order"
+            result["confidence"] = 0.99
+            logger.info(
+                "order_cancel_override",
                 extra={"tenant_id": state["tenant_id"], "thread_id": state["thread_id"]},
             )
         return {
@@ -521,6 +538,19 @@ def _compose_with_llm(state: ChatState, llm_client: Any) -> dict:
         return {
             "reply_text": reply,
             "action": "order",
+            "messages": messages + [{"role": "user", "content": state["message_text"]}, {"role": "assistant", "content": reply}],
+        }
+
+    if intent == "cancel_order":
+        reply = (
+            "Baik Kak, pesanan yang tadi kami batalkan ya 🙏 "
+            "Kalau Kakak berubah pikiran atau mau pesan yang lain, tinggal bilang saja."
+        )
+        messages = state.get("messages", []) or []
+        return {
+            "reply_text": reply,
+            "action": "reply",
+            "order_draft": [],  # clear the running draft
             "messages": messages + [{"role": "user", "content": state["message_text"]}, {"role": "assistant", "content": reply}],
         }
         
