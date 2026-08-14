@@ -91,8 +91,22 @@ def _persona_for_tenant(tenant_id: str) -> str | None:
         return None
 
 
+def _welcome_for_tenant(tenant_id: str) -> str | None:
+    """Return the merchant's configured welcome_message, or None."""
+    try:
+        from app.db.tenant_repo import get_tenant
+        import json as _json
+
+        tenant = get_tenant(tenant_id)
+        if tenant is None:
+            return None
+        data = _json.loads(tenant.get("onboarding_data") or "{}")
+        return (data.get("welcome_message") or "").strip() or None
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def _style_profile_block(tenant: dict) -> str:
-    """Build a 'gaya bicara toko' instruction block from the stored style_profile."""
     import json as _json
 
     try:
@@ -547,6 +561,21 @@ def _compose_with_llm(state: ChatState, llm_client: Any) -> dict:
 
     intent = state["intent"]
     match_kind = state.get("match_kind") or "none"
+
+    # First contact: greet with the merchant's configured welcome message
+    # (deterministic, no LLM) so a plain "halo" never falls through to the
+    # human-handoff message. Only when the buyer hasn't sent anything yet.
+    if not state.get("messages") and intent == "unclear":
+        welcome = _welcome_for_tenant(state["tenant_id"])
+        if welcome:
+            return {
+                "reply_text": welcome,
+                "action": "reply",
+                "messages": [
+                    {"role": "user", "content": state["message_text"]},
+                    {"role": "assistant", "content": welcome},
+                ],
+            }
 
     # Build the retrieved_row we pass to the LLM / validator. May be None
     # when lookup returned nothing (e.g., match_kind == "none").

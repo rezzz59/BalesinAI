@@ -512,7 +512,7 @@ async def update_behavior(req: BehaviorRequest, user=Depends(current_user)):
         data = {}
         
     data["custom_behavior"] = req.behavior.strip()
-    update_onboarding_data(user.uid, data)
+    update_onboarding_data(tenant["tenant_id"], data)
     
     return {"status": "ok", "message": "Behavior updated"}
 
@@ -534,7 +534,7 @@ async def update_knowledge(req: KnowledgeRequest, user=Depends(current_user)):
         data = {}
         
     data["knowledge_text"] = req.knowledge_text.strip()
-    update_onboarding_data(user.uid, data)
+    update_onboarding_data(tenant["tenant_id"], data)
     
     return {"status": "ok", "message": "Knowledge updated"}
 
@@ -552,7 +552,7 @@ async def update_welcome_message(req: WelcomeMessageRequest, user=Depends(curren
         data = {}
         
     data["welcome_message"] = req.welcome_message.strip()
-    update_onboarding_data(user.uid, data)
+    update_onboarding_data(tenant["tenant_id"], data)
     
     return {"status": "ok", "message": "Welcome message updated"}
 
@@ -572,6 +572,6 @@ async def update_followup(req: FollowupRequest, user=Depends(current_user)):
         
     data["followup_delay_minutes"] = max(0, req.delay_minutes)
     data["followup_prompt"] = req.prompt.strip()
-    update_onboarding_data(user.uid, data)
+    update_onboarding_data(tenant["tenant_id"], data)
     
     return {"status": "ok", "message": "Follow-up settings updated"}

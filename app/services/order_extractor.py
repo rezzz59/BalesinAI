@@ -18,7 +18,7 @@ _XQTY_REV_PATTERN = re.compile(r"(\d{1,3})\s*x\b", re.IGNORECASE)
 _BARE_QTY = re.compile(r"(?:^|\s)(\d{1,3})(?=\s*(?:x\s*)?{name}\b)|(?:^|\s){name}\s*x?\s*(\d{1,3})(?=\s|$)", re.IGNORECASE)
 
 _NAME_PATTERNS = [
-    re.compile(r"(?:nama\s*(?:saya|aku)?|atas\s+nama|a\.?n\.?)\s*:?\s*([A-Za-z][A-Za-z.\s]{1,49})"),
+    re.compile(r"(?:nama\s*(?:saya|aku)?|atas\s+nama|\ba\.?n\.?)\s*:?\s*([A-Za-z][A-Za-z.\s]{1,49})"),
     re.compile(r"(?:untuk\s+|buat\s+)([A-Za-z][A-Za-z.\s]{1,49})$"),
 ]
 _ADDRESS_PATTERNS = [
@@ -189,13 +189,31 @@ def _match_products(message: str, catalog: list[dict]) -> list[dict]:
                     score = overlap / len(name_tokens)
                     if overlap >= 1 and score >= 0.5:
                         scored.append((score, -idx, row))
-            for _, _, row in sorted(scored, key=lambda t: (t[0], t[1]), reverse=True):
+            # Pick the best-scoring variant per DISTINCT family. A bare
+            # "kaos hitam" names one intent → one family; with an explicit
+            # connector ("kaos ... dan hoodie ...") each family yields one item.
+            best_by_family: dict[str, tuple[float, int, dict]] = {}
+            for score, neg_idx, row in sorted(scored, key=lambda t: (t[0], t[1]), reverse=True):
+                family = _normalize(row["nama_produk"].strip().split(" - ")[0])
+                if family not in best_by_family:
+                    best_by_family[family] = (score, neg_idx, row)
+            for _, _, row in sorted(best_by_family.values(), key=lambda t: (t[0], t[1]), reverse=True):
                 key = _normalize(row["nama_produk"].strip())
                 if key in claimed:
                     continue
                 claimed.add(key)
                 matched.append(row)
+                if not _has_item_connector(msg):
+                    break
     return matched
+
+
+_ITEM_CONNECTOR = re.compile(r"\b(dan|sama|plus|sekalian|serta|&)\b", re.IGNORECASE)
+
+
+def _has_item_connector(message: str) -> bool:
+    """True when the message lists multiple items with an explicit connector."""
+    return bool(_ITEM_CONNECTOR.search(message or ""))
 
 
 def _name_tokens(text: str) -> set[str]:
