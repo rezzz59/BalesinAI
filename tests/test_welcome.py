@@ -43,7 +43,8 @@ async def test_send_whatsapp_prepends_intro_on_empty_history():
     await send_whatsapp(state, gateway)
 
     sent = gateway.send_message.call_args[1]["message"]
-    assert "Halo kak" in sent
+    assert "Selamat datang" in sent
+    assert "Ada yang ingin ditanyakan" in sent
     assert "Sepatu ini ready." in sent
 
 
@@ -63,5 +64,5 @@ async def test_send_whatsapp_skips_intro_when_history_exists():
     await send_whatsapp(state, gateway)
 
     sent = gateway.send_message.call_args[1]["message"]
-    assert "Halo kak" not in sent
+    assert "Selamat datang" not in sent
     assert sent == "Sepatu ini ready."

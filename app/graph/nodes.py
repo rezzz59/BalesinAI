@@ -825,7 +825,10 @@ async def send_whatsapp(state: ChatState, gateway_client: Any) -> dict:
         if not history:
             # First turn in this thread — introduce the virtual assistant once
             # (no privacy disclaimer, just a natural opener).
-            intro = "Halo kak 👋 Saya asisten virtual dari toko ini. Langsung tanya saja produk, harga, atau stok ya ✨\n\n"
+            intro = (
+                "Halo Kak 👋 Selamat datang! Saya asisten virtual toko ini, "
+                "siap bantu cek produk, stok, atau harga. Ada yang ingin ditanyakan? 😊\n\n"
+            )
         await gateway_client.send_message(
             phone=state["wa_number"],
             message=intro + state["reply_text"],
