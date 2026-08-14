@@ -105,6 +105,11 @@ class FonnteGateway(PhoneGateway):
             delay: Random send delay range, e.g. "2-5" seconds (human-like pacing).
             sequence: Send parts in strict order (no delays applied).
         """
+        
+        # Anti-Ban: Apply human delay before sending 
+        # BalesinAI ensures that responses aren't blasted instantaneously.
+        await self.simulate_human_delay(message)
+        
         target = phone.lstrip("+")
         payload: dict[str, Any] = {"target": target, "message": message}
         if url:

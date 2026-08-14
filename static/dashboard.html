@@ -763,6 +763,7 @@ async function loadSettings() {
   const d = await fetchJson("/api/dashboard/settings" + TENANT_QS());
   const s = (d && d.settings) || {};
   const rt = (d && d.readiness) || {};
+  const a = (d && d.analytics) || {};
   const metric = (k,v) => '<div class="metric"><span class="m-label">' + k + '</span><span class="m-val num">' + esc(String(v ?? "-")) + '</span></div>';
   const bt = { "jualan":"Toko Online / Umum", "kuliner":"Kuliner / Makanan", "fashion":"Fashion / Pakaian", "klinik":"Klinik / Kesehatan" };
   
@@ -772,11 +773,13 @@ async function loadSettings() {
     metric("Status bot", s.onboarding_status) +
     metric("Google Sheet", s.google_sheet_id ? (s.google_sheet_id.slice(0,18) + "…") : "-");
     
+  // Gunakan data analytics betulan dari server
   document.getElementById("settingsBot").innerHTML =
-    metric("Skor kesiapan", (rt.score != null ? rt.score + "/100" : "-")) +
-    metric("Pesan dibalas bot", rt.containment_rate != null ? Math.round(rt.containment_rate*100) + "%" : "-") +
-    metric("Jumlah fallback", rt.fallbacks ?? "-") +
-    metric("Pertanyaan golden terjawab", rt.golden_hits ?? "-");
+    metric("Containment Rate", a.containment_rate != null ? a.containment_rate + "%" : "-") +
+    metric("Pesanan Hari Ini", a.orders_today ?? "-") +
+    metric("Omzet Hari Ini", a.revenue_today ? rupiah(a.revenue_today) : "-") +
+    metric("Jumlah Fallback (30 hr)", a.fallbacks_30d ?? "-") +
+    metric("Skor Kesiapan Sheet", (rt.score != null ? rt.score + "/100" : "-"));
 
   // Populate AI config fields
   if(document.getElementById("inp-welcome")) document.getElementById("inp-welcome").value = s.welcome_message || "";

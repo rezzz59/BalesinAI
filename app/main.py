@@ -201,108 +201,66 @@ async def whatsapp_webhook(request: Request):
         logger.error(f"ERROR parsing JSON: {e}")
         raise HTTPException(status_code=400, detail="Invalid JSON payload")
 
-    # 3. Check if this is a delivery callback (not an incoming message)
-    # Fonnte sends different payloads for messages and delivery statuses
-    # Delivery callbacks have 'device' and 'state' fields but NOT 'wa_number', 'thread_id', or 'message_text'
-    if "device" in data and "state" in data:
-        logger.info("Skipping delivery callback - not a user message: %s", str(data)[:100])
-        # Return 200 ok to acknowledge receipt but don't process
-        return {"status": "ok", "reason": "delivery_callback", "tenant_id": data.get("device", "unknown")}
+    # 3. Check Webhook Provider format (Fonnte vs WAHA)
+    is_waha = "event" in data and "payload" in data
+    
+    if is_waha:
+        # Handling WAHA payload format
+        if data.get("event") != "message":
+            return {"status": "ok", "reason": f"ignored_event_{data.get('event')}"}
+            
+        payload = data.get("payload", {})
+        if payload.get("fromMe"):
+            return {"status": "ok", "reason": "outbound_message"}
+            
+        device = payload.get("session", "unknown")
+        wa_number = payload.get("from", "").replace("@c.us", "")
+        message_text = payload.get("body", "")
+        participant = payload.get("participant")  # for groups, but we ignore groups generally
+    else:
+        # Check if this is a Fonnte delivery callback
+        if "device" in data and "state" in data:
+            logger.info("Skipping Fonnte delivery callback: %s", str(data)[:100])
+            return {"status": "ok", "reason": "delivery_callback", "tenant_id": data.get("device", "unknown")}
+            
+        # Standard Fonnte payload extraction
+        device = data.get("device", "default_tenant")
+        wa_number = data.get("sender", "")
+        message_text = data.get("message", "")
+        
+    # Ignore group messages
+    if "-" in wa_number or (is_waha and payload.get("from", "").endswith("@g.us")):
+        return {"status": "ok", "reason": "group_message_ignored"}
 
     # 4. Extract tenant ID (X-Tenant-ID header takes priority, fallback to device number)
     tenant_id = (
         request.headers.get("X-Tenant-ID")
         or data.get("tenant_id")
-        or data.get("device", "default_tenant")  # Fonnte sends device number
+        or device
     )
 
     # 5. Look up tenant configuration from DB
     settings = get_settings()
     tenant_record = get_tenant(tenant_id)
     if not tenant_record:
-        # Fallback: map the Fonnte device number to the tenant that owns it
-        # (tenant IDs are merchant-friendly, not device numbers).
         from app.db.tenant_repo import get_tenant_by_device
-
-        tenant_record = get_tenant_by_device(data.get("device", ""))
+        tenant_record = get_tenant_by_device(device)
         if tenant_record is not None:
-            tenant_id = tenant_record["tenant_id"]
+            tenant_id = tenant_record['tenant_id']
     if not tenant_record:
-        logger.warning("tenant_not_found", extra={"tenant_id": tenant_id})
-        raise HTTPException(
-            status_code=404,
-            detail=f"Tenant '{tenant_id}' not configured. Use /admin/tenants to create.",
-        )
+        logger.warning('tenant_not_found', extra={'tenant_id': tenant_id})
+        raise HTTPException(status_code=404, detail=f"Tenant '{tenant_id}' not configured.")
 
-    # 5. Validate and extract request payload fields (flexible for different Fonnte formats)
-    # Try multiple possible field names that Fonnte might use in different message formats
+    if wa_number and not wa_number.startswith('+'):
+        wa_number = '+' + wa_number
 
-    # Try Indonesian format first (Fonnte actually uses Indonesian field names)
-    sender_id = (
-        data.get("pengirim")
-        or data.get("sender")
-        or data.get("from")
-        or data.get("phone")
-        or data.get("wa_number")
-        or ""
-    )
+    # Set thread_id based on device and sender
+    thread_id = data.get('inboxid') or data.get('conversation_id') or f"{tenant_id}:{wa_number}"
+    thread_id = str(thread_id)
 
-    # Handle '+' prefix for WhatsApp numbers (Fonnte strips it)
-    if sender_id and not sender_id.startswith("+"):
-        wa_number = "+" + sender_id
-    else:
-        wa_number = sender_id
-
-    # Use inboxid or sender_lid or hash of sender as thread identifier
-    thread_id = (
-        data.get("inboxid")
-        or data.get("conversation_id")
-        or data.get("thread_id")
-        or data.get("id")
-        or data.get("session_id")
-        or data.get("senderlid")  # Fonnte format like "50650750660756@lid"
-        or ""
-    )
-
-    # Convert thread_id to string (inboxid is int)
-    if thread_id is not None:
-        thread_id = str(thread_id)
-
-    # Try to find message text in various formats
-    # IMPORTANT: 'pesan' (Indonesian for "message") is the actual message text from Fonnte!
-    message_text = (
-        data.get("pesan")
-        or data.get("message")
-        or data.get("text")
-        or data.get("body")
-        or data.get("content")
-        or data.get("message_text")
-        or ""
-    )
-
-    # Filter out non-text messages (button replies, etc.)
-    if data.get("type") == "text" or not data.get("type"):
-        # This is a text message - use the text we extracted
-        pass
-    else:
-        # If it's a button/polling/media reply, log it and continue
-        logger.info(f"Received non-text message type: {data.get('type')}")
-
-    missing = []
-    if not wa_number:
-        missing.append("wa_number (or pengirim/sender/from)")
-    if not thread_id:
-        missing.append("thread_id (or inboxid/conversation_id/id/senderlid)")
-    if not message_text:
-        missing.append("message_text (or pesan/message/text/body/content)")
-    if missing:
-        logger.warning(f"Incomplete message payload keys: {list(data.keys())[:5]}")
-        return {
-            "status": "warning",
-            "partial_data": dict(list(data.items())[:5]),
-            "missing_fields": missing,
-            "tenant_id": tenant_id
-        }
+    if not wa_number or not message_text:
+        logger.info('skipped_empty_message', extra={'data': str(data)[:100]})
+        return {'status': 'ok', 'reason': 'empty_message'}
 
     # 6. Create tenant-specific state, seeding it with saved conversation
     #    memory (multi-turn order draft + last mentioned product) for this thread.
@@ -701,6 +659,10 @@ async def dashboard_catalog_endpoint(request: Request, tenant_id: str = ""):
 async def dashboard_settings_endpoint(request: Request, tenant_id: str = ""):
     """Merchant view: store settings + bot readiness for authenticated tenant."""
     from app.db.tenant_repo import get_tenant
+    from app.db.engine import get_session
+    from app.db.models import ChatLog, Order
+    from sqlalchemy import func
+    from datetime import datetime, timezone, timedelta
 
     tenant = _resolve_tenant_id_for_user(request, tenant_id)
     record = get_tenant(tenant)
@@ -726,8 +688,53 @@ async def dashboard_settings_endpoint(request: Request, tenant_id: str = ""):
         "followup_delay_minutes": onboarding_data.get("followup_delay_minutes", 0),
         "followup_prompt": onboarding_data.get("followup_prompt", ""),
     }
+    
+    # Generate Real Analytics
+    today = datetime.now(timezone.utc).date()
+    yesterday = today - timedelta(days=1)
+    
+    with get_session() as db:
+        # Orders Today
+        orders_today = db.query(func.count(Order.id)).filter(
+            Order.tenant_id == tenant,
+            func.date(Order.created_at) == today
+        ).scalar() or 0
+        
+        # Revenue Today
+        revenue_today = db.query(func.sum(Order.total)).filter(
+            Order.tenant_id == tenant,
+            func.date(Order.created_at) == today
+        ).scalar() or 0
+        
+        # Bot Performance (Last 30 days containment rate)
+        thirty_days_ago = today - timedelta(days=30)
+        logs = db.query(ChatLog.status, func.count(ChatLog.id)).filter(
+            ChatLog.tenant_id == tenant,
+            func.date(ChatLog.timestamp) >= thirty_days_ago
+        ).group_by(ChatLog.status).all()
+        
+        total_logs = 0
+        fallbacks = 0
+        for status, count in logs:
+            total_logs += count
+            if status == "fallback":
+                fallbacks += count
+                
+        containment = 100
+        if total_logs > 0:
+            containment = int(((total_logs - fallbacks) / total_logs) * 100)
+            
+    analytics = {
+        "orders_today": orders_today,
+        "revenue_today": revenue_today,
+        "containment_rate": containment,
+        "fallbacks_30d": fallbacks,
+        "total_chats_30d": total_logs
+    }
+
     return {
         "tenant_id": tenant,
         "settings": safe_settings,
         "readiness": readiness,
+        "analytics": analytics
     }
