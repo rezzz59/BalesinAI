@@ -140,6 +140,58 @@ class TestExtractItems:
         assert extract_items("kaos hitam 2", []) == []
 
 
+class TestVariantPicking:
+    """Family match must pick the variant matching the buyer's named color/size."""
+
+    VARIANTS = [
+        {"nama_produk": "Kaos Oversize Crop - Sage Green - Size XXL", "harga": 80000},
+        {"nama_produk": "Kaos Oversize Crop - Hitam - Size L", "harga": 70000},
+        {"nama_produk": "Kaos Oversize Crop - Hitam - Size XL", "harga": 65000},
+        {"nama_produk": "Kaos Oversize Crop - Dusty Pink - Size S", "harga": 75000},
+        {"nama_produk": "Kaos Oversize Crop - Merah Cabe - Size L", "harga": 80000},
+    ]
+
+    def test_color_and_size_match(self):
+        items = extract_items("saya mau order kaos oversize crop hitam size L 2 pcs", self.VARIANTS)
+        assert len(items) == 1
+        assert items[0]["product"] == "Kaos Oversize Crop - Hitam - Size L"
+        assert items[0]["qty"] == 2
+        assert items[0]["price"] == 70000.0
+
+    def test_size_pinpoints_variant(self):
+        items = extract_items("kaos oversize crop size xl 1", self.VARIANTS)
+        assert len(items) == 1
+        assert items[0]["product"] == "Kaos Oversize Crop - Hitam - Size XL"
+
+    def test_compound_color_joined_token(self):
+        items = extract_items("kaos oversize crop dustypink size s 1", self.VARIANTS)
+        assert len(items) == 1
+        assert items[0]["product"] == "Kaos Oversize Crop - Dusty Pink - Size S"
+
+    def test_compound_color_split_words(self):
+        items = extract_items("kaos oversize crop merah cabe size l 1", self.VARIANTS)
+        assert len(items) == 1
+        assert items[0]["product"] == "Kaos Oversize Crop - Merah Cabe - Size L"
+
+    def test_fuzzy_family_with_color(self):
+        catalog = [{"nama_produk": "Jogger Pants Cotton - Putih - Size XXL", "harga": 145000}]
+        items = extract_items("jogger putih size xxl 1", catalog)
+        assert len(items) == 1
+        assert items[0]["product"] == "Jogger Pants Cotton - Putih - Size XXL"
+
+    def test_desc_stored_variants_still_match(self):
+        """Catalogs that keep size/color in the description (no ' - ' variant
+        segments) must still match a full order message."""
+        catalog = [
+            {"nama_produk": "Kemeja Batik Pria Premium", "harga": "Rp 135.000",
+             "deskripsi": "warna hitam dan navy, size M-XXL"},
+        ]
+        items = extract_items("mau beli 2 kemeja batik premium size L warna navy", catalog)
+        assert len(items) == 1
+        assert items[0]["product"] == "Kemeja Batik Pria Premium"
+        assert items[0]["qty"] == 2
+
+
 # ---------------------------------------------------------------------------
 # extract_buyer_info
 # ---------------------------------------------------------------------------

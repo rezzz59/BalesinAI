@@ -37,6 +37,7 @@ _ATTR_TOKENS = {"hitam", "putih", "navy", "biru", "merah", "abu", "krem", "cokla
                 "cokelat", "hijau", "ungu", "pink", "cream", "maroon", "kuning",
                 "orange", "s", "m", "l", "xl", "xxl", "xxxl", "xs"}
 
+_SIZE_TOKENS = {"xs", "s", "m", "l", "xl", "xxl", "xxxl"}
 _SIZE_RE = re.compile(r"\b(?:size|ukuran|sz)\s*[:=]?\s*(xxxl|xxl|xl|l|m|s|xs)\b", re.IGNORECASE)
 _COLORS = ("hitam", "putih", "navy", "biru", "merah", "abu", "krem", "coklat",
            "cokelat", "hijau", "ungu", "pink", "cream", "maroon", "kuning", "orange", "toska")
@@ -137,25 +138,57 @@ def _match_products(message: str, catalog: list[dict]) -> list[dict]:
         elif family and family in msg and len(family) >= 3:
             # Family match — claim the family so a generic "kaos" doesn't also claim it.
             claimed.add(family)
-            matched.append(row)
+            matched.append(_best_variant(rows, family, msg))
 
     # Token-overlap fallback for unmatched messages (partial phrasing).
     if not matched:
         msg_tokens = _name_tokens(msg)
+        msg_color_terms = _msg_color_terms(rows, msg)
+        msg_size = (extract_size_color(msg)[0] or "").lower()
         if msg_tokens:
-            scored: list[tuple[float, int, dict]] = []
-            for idx, row in enumerate(rows):
+            def _score_row(row: dict) -> float | None:
                 name = row["nama_produk"].strip()
                 key = _normalize(name)
                 if key in claimed:
-                    continue
+                    return None
                 name_tokens = _name_tokens(_normalize(name.split(" - ")[0]))
                 if not name_tokens:
-                    continue
+                    return None
+                # Narrow to the buyer's named color/size when variants exist for it.
+                if msg_color_terms and not (_row_color_terms(name) & msg_color_terms):
+                    return None
+                if msg_size and msg_size not in set(_normalize(name).split()):
+                    return None
                 overlap = len(msg_tokens & name_tokens)
                 score = overlap / len(name_tokens)
-                if overlap >= 1 and score >= 0.5:
-                    scored.append((score, -idx, row))
+                # Color/size already pinned the variant family — a bare token
+                # like "jogger" (1/3 vs "Jogger Pants Cotton") is enough.
+                min_score = 1 / max(len(name_tokens), 1) if (msg_color_terms or msg_size) else 0.5
+                if overlap >= 1 and score >= min_score:
+                    return score
+                return None
+
+            scored = []
+            for idx, row in enumerate(rows):
+                s = _score_row(row)
+                if s is not None:
+                    scored.append((s, -idx, row))
+            # Color/size filters can over-reject catalogs that store variants in
+            # the description (e.g. "size M-XXL"). If the filters left nothing,
+            # retry without them so a plain family-token match still wins.
+            if not scored:
+                for idx, row in enumerate(rows):
+                    name = row["nama_produk"].strip()
+                    key = _normalize(name)
+                    if key in claimed:
+                        continue
+                    name_tokens = _name_tokens(_normalize(name.split(" - ")[0]))
+                    if not name_tokens:
+                        continue
+                    overlap = len(msg_tokens & name_tokens)
+                    score = overlap / len(name_tokens)
+                    if overlap >= 1 and score >= 0.5:
+                        scored.append((score, -idx, row))
             for _, _, row in sorted(scored, key=lambda t: (t[0], t[1]), reverse=True):
                 key = _normalize(row["nama_produk"].strip())
                 if key in claimed:
@@ -170,6 +203,59 @@ def _name_tokens(text: str) -> set[str]:
     size/color/attribute labels excluded so they can't over-match)."""
     tokens = {w for w in re.findall(r"[a-z0-9]{2,}", text)}
     return {t for t in tokens if t not in _STOP_TOKENS and t not in _ATTR_TOKENS}
+
+
+def _row_color_terms(name: str) -> set[str]:
+    """Color tokens in a catalog row name ("Family - Color - Size X").
+
+    Returns the middle segment's tokens, so "Kaos - Sage Green - Size L" yields
+    {"sage", "green"} and a monochrome row with no color yields {}.
+    """
+    parts = _normalize(name).split(" - ")
+    return set(parts[1].split()) if len(parts) >= 2 else set()
+
+
+def _msg_color_terms(rows: list[dict], msg: str) -> set[str]:
+    """Color tokens named in *msg*, learned from the catalog's own color labels.
+
+    Handles compound colors like "dusty pink"/"sage green" that aren't in the
+    fixed _COLORS list: any catalog color term that appears (even inside a
+    joined token like "dustypink") is treated as named in the message.
+    """
+    msg = _normalize(msg)
+    if not msg:
+        return set()
+    known = set()
+    for r in rows:
+        known |= _row_color_terms(r.get("nama_produk") or "")
+    return {t for t in known if t in msg}
+
+
+def _best_variant(rows: list[dict], family: str, msg: str) -> dict:
+    """Pick the variant of *family* that best matches the color/size the buyer
+    mentioned in *msg*; fall back to the first (longest-name) row.
+
+    The catalog lists variants as "Family - Color - Size X". When the message
+    says "kaos oversize crop hitam size L", the plain family match would grab
+    whatever variant sorts first (wrong color/size). Score every sibling by
+    color-then-size overlap with the message and take the best.
+    """
+    msg = _normalize(msg)
+    msg_terms = set(msg.split())
+    msg_color_terms = _msg_color_terms(rows, msg)
+    msg_size = (extract_size_color(msg)[0] or "").lower()
+    candidates = [
+        r for r in rows
+        if (r.get("nama_produk") or "").strip().split(" - ")[0].strip().lower() == family
+    ] or [rows[0]]
+    best, best_score = candidates[0], (-1, -1)
+    for r in candidates:
+        name_terms = set(_normalize(r.get("nama_produk", "")).split())
+        c_score = len(name_terms & msg_color_terms)
+        s_score = 1 if msg_size and msg_size in name_terms else 0
+        if (c_score, s_score) > best_score:
+            best, best_score = r, (c_score, s_score)
+    return best
 
 
 def extract_size_color(message: str) -> tuple[str | None, str | None]:
