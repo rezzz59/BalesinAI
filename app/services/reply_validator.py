@@ -3,8 +3,12 @@ import re
 
 
 _EMOJI_PATTERN = re.compile(
-    "[😀😃😄😁😆😅🤣😂🙂🙃😉😊😇🥰😍🤩😘😗😙😚😋😛😜🤪😝🤑🤗🤭🤫🤔🤐😐😑😶🙄😏😒🙃😬🤥😌���😪🤤😴😷🤒🤕🤢🤮🤧🥵🥶🥴😵🤯🤠🥳😎🤓🧐😕😟🙁☹️😮😯😲😳🥺😦😧😨😰😥😢😭😱😖😣😞😓😩😫🥱😤😡😠🤬😈👿💀💩🤡👹👺👻👽👾🤖💋💯💢💥💫💦💨🕳️❤️🧡💛💚💙💜🤎🖤🤍💔❣️💕💞💓💗💘💝💟🔥⭐🌟✨🎉🎊🎈🎁🎂🙏👍👎👌🤞🤟🤘🤙👈👉👆🖕👇☝️✊👊🤛🤜👏🙌👐🤲🤝🙏✍️💅🤳💪🦾🦵🦿🦶👂🦻👃🧠🦷🦴👀👁️👅👄💋]"
+    "[😀😃😄😁😆😅🤣😂🙂🙃😉😊😇🥰😍🤩😘😗😙😚😋😛😜🤪😝🤑🤗🤭🤫🤔🤐😐😑😶🙄😏😒🙃😬🤥😌😴😪🤤😷🤒🤕🤢🤮🤧🥵🥶🥴😵🤯🤠🥳😎🤓🧐😕😟🙁☹️😮😯😲😳🥺😦😧😨😰😥😢😭😱😖😣😞😓😩😫🥱😤😡😠🤬😈👿💀💩🤡👹👺👻👽👾🤖💋💯💢💥💫💦💨🕳️❤️🧡💛💚💙💜🤎🖤🤍💔❣️💕💞💓💗💘💝💟🔥⭐🌟✨🎉🎊🎈🎁🎂🙏👍👎👌🤞🤟🤘🤙👈👉👆🖕👇☝️✊👊🤛🤜👏🙌👐🤲🤝✍️💅🤳💪🦾🦵🦿🦶👂🦻👃🧠🦷🦴👀👁️👅👄]"
 )
+
+# Non-Indonesian scripts that must never appear in a reply (LLMs occasionally
+# leak CJK/Arabic when translating a source row).
+_NON_LATIN = re.compile(r"[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af\u0600-\u06ff]")
 
 
 def _count_sentences(text: str) -> int:
@@ -82,6 +86,9 @@ def validate_sales_style(reply_text: str, user_message: str = "") -> tuple:
       - don't ask about attributes customer already mentioned
     """
     violations = []
+
+    if _NON_LATIN.search(reply_text):
+        violations.append("reply contains non-Indonesian script (e.g. Mandarin/Arabic)")
 
     n_sent = _count_sentences(reply_text)
     if n_sent > 6:

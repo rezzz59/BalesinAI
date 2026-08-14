@@ -594,7 +594,8 @@ def _compose_with_llm(state: ChatState, llm_client: Any) -> dict:
         "prices, sizes, colors, or stock status.]"
     )
     style_hint = (
-        "\n\n[Style hint: your reply must END with exactly ONE guiding question that "
+        "\n\n[Style hint: reply ONLY in pure Indonesian (no Mandarin/Arabic/other scripts), "
+        "must END with exactly ONE guiding question that "
         "invites the buyer to reply (and no more than one question in total). Never "
         "end with a plain statement, a price list, or passive thanks — otherwise the "
         "buyer will stop replying (ghosting). If the buyer already named a size, color, "
@@ -630,7 +631,7 @@ def _compose_with_llm(state: ChatState, llm_client: Any) -> dict:
                 "messages": messages,
             }
         except LLMValidationError as e:
-            if "question" in str(e) or "emoji" in str(e) or "sentences" in str(e) or "listener" in str(e):
+            if any(k in str(e) for k in ("question", "emoji", "sentences", "listener", "non-Indonesian")):
                 retry_hint = style_hint
             logger.warning(
                 "compose_validation_failed",

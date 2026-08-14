@@ -97,3 +97,17 @@ def test_one_sentence_single_emoji_ok():
     """Single emoji and one sentence passes."""
     ok, msg = validate_sales_style("Terima kasih! Mau dibantu apa lagi, Kak? 👍")
     assert ok is True
+
+
+def test_mandarin_script_fails():
+    """Reply leaking non-Indonesian script (e.g. Mandarin) must be rejected."""
+    ok, msg = validate_sales_style("setiap 10x order可以获得 diskon 10%. Mau ambil promo ini, Kak?")
+    assert ok is False
+    assert "non-Indonesian" in msg
+
+
+def test_arabic_script_fails():
+    """Reply leaking Arabic script must be rejected."""
+    ok, msg = validate_sales_style("Ada promo شكرا ya Kak. Mau pesan berapa?")
+    assert ok is False
+    assert "non-Indonesian" in msg
