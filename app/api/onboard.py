@@ -55,6 +55,16 @@ def _validate_wa_number(num: str) -> str:
     return digits
 
 
+def _normalize_wa(num: str) -> str:
+    """Normalize a number for comparison without raising."""
+    digits = "".join(ch for ch in (num or "").strip() if ch.isdigit())
+    if digits.startswith("0"):
+        return "62" + digits[1:]
+    if not digits.startswith("62"):
+        return "62" + digits
+    return digits
+
+
 def _media_dir(tenant_id: str) -> str:
     d = os.path.join(MEDIA_ROOT, tenant_id)
     os.makedirs(d, exist_ok=True)
@@ -386,41 +396,70 @@ async def device_status(request: Request):
     """Return the current device pairing status for the user's tenant.
 
     When the device is pending, queries Fonnte's device profile (via the stored
-    device token) to confirm whether it has been paired — and, if so, corrects
-    fonnte_device_id to the REAL WhatsApp number that scanned the QR (the label
-    used at add-device time may differ from the number actually linked).
+    device token) to confirm whether it has been paired — and validates that the
+    REAL WhatsApp number that scanned the QR matches the intended device number.
     """
     user = current_user(request)
     tenant = _user_tenant(user)
 
     status = tenant.get("device_status", "fresh")
-    real_number = tenant.get("fonnte_device_id", "")
+    intended = tenant.get("fonnte_device_id", "")
+    real_number = intended
+    valid = None  # None=unknown, True=scanned number matches, False=mismatch
 
     if status == "pending":
-        # Verify the REAL connect state from the account (get-devices), which
-        # reports each device's status as connect/disconnect. The label used at
-        # add-device time is intentionally ignored for the connect decision.
         settings = get_settings()
         account_token = settings.fonnte_account_token
         if account_token:
             try:
                 from app.services.fonnte import FonnteGateway, FonnteError
 
+                # 1. Connect state from the account (get-devices), matched by label.
                 res = await FonnteGateway(api_key=account_token).get_devices()
+                connected = False
                 for dev in res.get("data", []):
-                    if dev.get("device") == tenant.get("fonnte_device_id"):
+                    if dev.get("device") == intended:
                         if dev.get("status") == "connect":
-                            update_device_status(tenant["tenant_id"], "connected")
-                            status = "connected"
+                            connected = True
                         elif dev.get("status") == "disconnect":
                             status = "disconnect"
                         break
+                if connected:
+                    status = "connected"
+                    # 2. Validate the REAL scanned number via the device token.
+                    device_token = ""
+                    if tenant.get("wa_api_key_encrypted"):
+                        try:
+                            device_token = decrypt_api_key(tenant["wa_api_key_encrypted"], settings.encryption_key)
+                        except Exception:  # noqa: BLE001
+                            device_token = ""
+                    if device_token:
+                        profile = await FonnteGateway(api_key=device_token).device_profile()
+                        scanned = str(profile.get("device", "")).replace("+", "").replace("-", "")
+                        if scanned:
+                            real_number = scanned
+                            valid = _normalize_wa(scanned) == _normalize_wa(intended)
+                            if not valid:
+                                # Reject: disconnect the wrong number, reset to pending.
+                                try:
+                                    await FonnteGateway(api_key=device_token).disconnect()
+                                except Exception:  # noqa: BLE001
+                                    pass
+                                update_device_status(tenant["tenant_id"], "rejected")
+                                status = "rejected"
+                                logger.warning(
+                                    "device_number_rejected",
+                                    extra={"tenant": tenant["tenant_id"], "intended": intended, "scanned": scanned},
+                                )
+                            else:
+                                update_device_status(tenant["tenant_id"], "connected")
             except Exception:  # noqa: BLE001
                 pass  # keep current status; frontend can retry
 
     return {
         "device": real_number,
         "device_status": status,
+        "device_match": valid,
         "tier": tenant.get("tier", "basic"),
         "gateway_plan": tenant.get("gateway_plan", "lite"),
     }

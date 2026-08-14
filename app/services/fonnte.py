@@ -32,8 +32,19 @@ class FonnteGateway(PhoneGateway):
     async def _post(self, path: str, payload: dict) -> dict[str, Any]:
         url = f"{self.base_url}{path}"
         headers = {"Authorization": self.api_key}
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            response = await client.post(url, headers=headers, data=payload)
+        last_err: httpx.RequestError | None = None
+        for attempt in range(1, self.max_retries + 1):
+            try:
+                async with httpx.AsyncClient(timeout=15.0) as client:
+                    response = await client.post(url, headers=headers, data=payload)
+                break
+            except httpx.RequestError as e:
+                last_err = e
+                logger.warning("fonnte_post_retry", extra={"path": path, "attempt": attempt, "error": str(e)})
+                if attempt < self.max_retries:
+                    await asyncio.sleep(0.1 * (2 ** (attempt - 1)))
+        else:
+            raise FonnteError(f"Fonnte connection error: {last_err}") from last_err
         if response.status_code >= 500:
             raise FonnteError(f"Fonnte {response.status_code}")
         if 400 <= response.status_code < 500:
@@ -80,6 +91,14 @@ class FonnteGateway(PhoneGateway):
         usable to validate that a QR scan actually connected.
         """
         return await self._post("/get-devices", {})
+
+    async def disconnect(self) -> dict[str, Any]:
+        """Disconnect the linked WhatsApp number from this device (DEVICE token).
+
+        Unlinks whatever number is currently paired. The device itself stays so
+        a new QR can be shown for re-scan.
+        """
+        return await self._post("/disconnect", {})
 
     async def send_message(
         self,

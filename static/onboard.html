@@ -239,6 +239,7 @@
                     qrImg.src = 'data:image/png;base64,' + d.qr;
                     document.getElementById('qrStatus').textContent =
                         'Scan QR dengan nomor WhatsApp yang ingin jadi bot (nomor yang di-scan lah yang terhubung).';
+                    pollDeviceStatus();
                 } else if (d.device_status === 'connected') {
                     qrImg.removeAttribute('src');
                     document.getElementById('qrStatus').textContent = '✅ Device sudah terhubung.';
@@ -248,6 +249,42 @@
                 }
                 setStatus('status3', 'ok', 'Perangkat diproses.');
             } catch (e) { setStatus('status3', 'error', 'Error: ' + e.message); }
+        }
+
+        let devicePollTimer = null;
+        async function pollDeviceStatus() {
+            if (devicePollTimer) clearInterval(devicePollTimer);
+            devicePollTimer = setInterval(async () => {
+                try {
+                    const res = await api('/api/onboard/device/status');
+                    if (!res.ok) return;
+                    const d = await res.json();
+                    const st = document.getElementById('qrStatus');
+                    if (d.device_status === 'connected') {
+                        clearInterval(devicePollTimer);
+                        devicePollTimer = null;
+                        if (d.device_match === false) {
+                            st.textContent = '⚠️ Terhubung sebagai ' + d.device +
+                                ' — BUKAN ' + document.getElementById('deviceWa').value.trim() +
+                                '. Nomor yang di-scan harus sesuai nomor yang diinput.';
+                        } else {
+                            st.textContent = '✅ Terhubung: ' + d.device;
+                        }
+                    } else if (d.device_status === 'rejected') {
+                        clearInterval(devicePollTimer);
+                        devicePollTimer = null;
+                        const qrImg = document.getElementById('qrImg');
+                        qrImg.removeAttribute('src');
+                        st.textContent = '❌ Ditolak: QR di-scan pakai nomor ' + d.device +
+                            ' (beda dari yang diinput). Koneksi diputus. Klik "Tampilkan QR" lagi untuk scan ulang dengan nomor yang benar.';
+                        document.getElementById('qrBox').classList.add('hidden');
+                    } else if (d.device_status === 'disconnect') {
+                        st.textContent = 'QR sudah di-scan, tapi koneksi terputus. Coba scan ulang.';
+                    } else if (d.device_match === false) {
+                        st.textContent = '⚠️ Terhubung sebagai ' + d.device + ' (beda dari yang diinput).';
+                    }
+                } catch (e) { /* transient — keep polling */ }
+            }, 4000);
         }
 
         async function saveTierAndContinue() {
@@ -312,7 +349,8 @@
                 const d = await res.json();
                 if (d.tenant && d.tenant.tenant_id) {
                     tenantId = d.tenant.tenant_id;
-                    document.getElementById('merchantName').value = (JSON.parse(d.tenant.onboarding_data || '{}').merchant_name) || '';
+                    const ob = typeof d.tenant.onboarding_data === 'string' ? JSON.parse(d.tenant.onboarding_data || '{}') : (d.tenant.onboarding_data || {});
+                    document.getElementById('merchantName').value = (ob.merchant_name) || '';
                     document.getElementById('ownerWa').value = d.tenant.owner_wa_number;
                     document.getElementById('liveInfo').textContent = 'Tenant ID: ' + tenantId;
                 }

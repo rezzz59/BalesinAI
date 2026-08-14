@@ -75,8 +75,9 @@
           full_name: document.getElementById('name').value.trim()
         })
       });
-      const d = await res.json();
-      if (!res.ok) { note.className = 'auth-note text-red-600'; note.textContent = d.detail || 'Gagal mendaftar.'; return; }
+      let d = {};
+      try { d = await res.json(); } catch (e) { d = {}; }
+      if (!res.ok) { note.className = 'auth-note text-red-600'; note.textContent = d.detail || ('Terjadi kesalahan server (' + res.status + '). Coba lagi.'); return; }
       window.location = '/onboard';
     } catch (err) {
       note.className = 'auth-note text-red-600';
