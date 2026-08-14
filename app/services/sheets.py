@@ -31,6 +31,8 @@ STOPWORDS_ID = frozenset({
     # polite particles (common in WhatsApp)
     "kak", "ya", "ga", "gak", "deh", "sih", "dong",
     "kok", "lho", "lah", "kan", "mah", "ajah",
+    # connective / determiner fillers that carry no matching signal
+    "yang", "aja", "saja", "nih", "itu", "ini", "toh",
     # generic time
     "sekarang", "nanti", "kemarin", "besok", "hari",
     "minggu", "bulan", "tahun", "tadi",
@@ -87,23 +89,43 @@ def _tokenize_meaningful(text: str) -> set[str]:
 
 
 def _score_faq_row(message: str, row: dict) -> float:
-    """Overlap ratio: meaningful message words ∩ (row's text fields).
+    """Overlap ratio: meaningful message words ∩ the row's QUESTION text.
 
-    Returns 0.0 if no meaningful words or no overlap. Range: 0.0 .. 1.0.
-    Also gives prefix bonus if the row's question text closely matches the message.
+    Returns 0.0 if no meaningful words or no overlap. Range: 0.0 .. ~1.1.
+
+    The QUESTION field is what the buyer's phrasing must match. The ANSWER only
+    contributes a small tie-break bonus so a "bahan" question whose answer
+    happens to mention "warna" can't outrank the real "warna" question.
     """
     msg_words = _tokenize_meaningful(message)
     if not msg_words:
         return 0.0
-    row_text = " ".join(str(v) for v in row.values() if v is not None)
-    row_words = _tokenize_meaningful(row_text)
-    if not row_words:
-        return 0.0
-    overlap = msg_words & row_words
-    base_score = len(overlap) / len(msg_words)
+
+    question = str(row.get("pertanyaan") or row.get("text") or "")
+    answer = str(row.get("jawaban") or "")
+
+    q_words = _tokenize_meaningful(question)
+    if not q_words:
+        # No question field (e.g. a catalog row passed as {"text": ...}) — match
+        # against the answer/description text instead.
+        q_words = _tokenize_meaningful(answer)
+        answer = ""
+
+    q_overlap = len(msg_words & q_words) / len(msg_words)
+
+    a_words = _tokenize_meaningful(answer)
+    a_overlap = len(msg_words & a_words) / len(msg_words) if a_words else 0.0
+
+    if q_overlap > 0.0:
+        # Question overlaps: it dominates; the answer only breaks ties.
+        base_score = q_overlap + 0.1 * a_overlap
+    else:
+        # No question overlap: the answer carries the match (e.g. "tukar size"
+        # → question "bisa retur kalau salah ukuran?" whose answer says "bisa
+        # tukar size"). Slightly discounted vs a direct question match.
+        base_score = 0.9 * a_overlap
 
     # Score bonus based on question-message similarity
-    question = str(row.get('pertanyaan', ''))
     message_clean = message.lower().strip('?! ')
     question_lower = question.lower().strip('?! ')
 

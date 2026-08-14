@@ -204,17 +204,17 @@ def test_score_faq_row_returns_zero_for_no_overlap():
 
 
 def test_score_faq_row_handles_question_and_answer():
-    """Score should consider both pertanyaan and jawaban fields."""
+    """Question dominates; the answer only adds a small tie-break bonus."""
     from app.services.sheets import _score_faq_row
 
     row = {
         "pertanyaan": "Bisa retur?",
         "jawaban": "Bisa, ongkir retur ditanggung pembeli",
     }
-    # "ongkir" and "retur" both appear in jawaban — but "bisa" is a stopword
-    # so message meaningful tokens are {"ongkir", "retur"} (2). Both overlap.
+    # "ongkir" only in jawaban, "retur" in both. Question overlap is 1/2 (retur),
+    # answer carries the rest when question overlap exists.
     score = _score_faq_row("ongkir retur", row)
-    assert score == 1.0
+    assert score == 0.6
 
 
 def test_score_faq_row_treats_punctuation_consistently():

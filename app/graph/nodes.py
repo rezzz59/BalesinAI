@@ -349,6 +349,36 @@ def lookup_catalog(
     try:
         if intent == "faq":
             match = sheets_client.lookup_faq(state["message_text"])
+            # Semantic re-rank: lexical overlap can't disambiguate "warna apa aja
+            # yang ready?" (list) from "warna sage green ready?" (specific). When
+            # FAQ embeddings are seeded, prefer the semantically-nearest row.
+            if semantic_search_client is not None:
+                try:
+                    hits = semantic_search_client.search(
+                        state["message_text"],
+                        tenant_id=state["tenant_id"],
+                        source="faq",
+                        limit=3,
+                        min_similarity=0.4,
+                    )
+                except SemanticSearchError as e:
+                    logger.warning(
+                        "semantic_search_failed",
+                        extra={"tenant_id": state["tenant_id"], "error": str(e)},
+                    )
+                    hits = []
+                if hits:
+                    faq_rows = sheets_client.read_faq()
+                    for hit in hits:
+                        try:
+                            idx = int(hit["row_id"])
+                            sem_match = faq_rows[idx]
+                        except (ValueError, TypeError, IndexError):
+                            continue
+                        sem_score = _score_faq_row(state["message_text"], sem_match)
+                        if sem_score >= FAQ_MATCH_THRESHOLD:
+                            match = sem_match
+                            break
             if match is None:
                 # If FAQ yields no match, try searching the catalog. 
                 # RAG strategy: the answer to "berapa harga kemeja?" is in the catalog row.
