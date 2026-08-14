@@ -190,7 +190,7 @@ async def save_wa_settings(request: Request):
         owner_wa_number=owner_wa_number or tenant["owner_wa_number"],
         business_type=tenant["business_type"],
         onboarding_status=tenant["onboarding_status"],
-        onboarding_data={},  # preserved via update below
+        onboarding_data=None,  # preserved via update below
         fonnte_device_id=fonnte_device_id or tenant["fonnte_device_id"],
         data_source=tenant["data_source"],
     )
@@ -367,7 +367,7 @@ async def provision_device(request: Request):
         owner_wa_number=tenant["owner_wa_number"],
         business_type=tenant["business_type"],
         onboarding_status=tenant["onboarding_status"],
-        onboarding_data={},
+        onboarding_data=None,
         fonnte_device_id=device_wa,
         data_source=tenant["data_source"],
     )

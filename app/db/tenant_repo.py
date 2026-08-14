@@ -86,7 +86,13 @@ def insert_or_update_tenant(
             tenant.payment_provider = payment_provider
             tenant.business_type = business_type
             tenant.onboarding_status = onboarding_status
-            tenant.onboarding_data = json.dumps(onboarding_data or {})
+            if onboarding_data:
+                try:
+                    existing = json.loads(tenant.onboarding_data or "{}")
+                except Exception:
+                    existing = {}
+                existing.update(onboarding_data)
+                tenant.onboarding_data = json.dumps(existing)
             tenant.fonnte_device_id = fonnte_device_id
             tenant.data_source = data_source
             if tier is not None:

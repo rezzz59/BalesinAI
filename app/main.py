@@ -223,10 +223,25 @@ async def whatsapp_webhook(request: Request):
             logger.info("Skipping Fonnte delivery callback: %s", str(data)[:100])
             return {"status": "ok", "reason": "delivery_callback", "tenant_id": data.get("device", "unknown")}
             
-        # Standard Fonnte payload extraction
+        # Standard Fonnte / generic payload extraction
         device = data.get("device", "default_tenant")
-        wa_number = data.get("sender", "")
-        message_text = data.get("message", "")
+        wa_number = (
+            data.get("sender")
+            or data.get("wa_number")
+            or data.get("pengirim")
+            or data.get("from")
+            or data.get("phone")
+            or ""
+        )
+        message_text = (
+            data.get("message")
+            or data.get("message_text")
+            or data.get("pesan")
+            or data.get("text")
+            or data.get("body")
+            or data.get("content")
+            or ""
+        )
         
     # Ignore group messages
     if "-" in wa_number or (is_waha and payload.get("from", "").endswith("@g.us")):
