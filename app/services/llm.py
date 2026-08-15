@@ -1151,9 +1151,19 @@ def validate_reply(reply: str, source_row: dict | str | None) -> None:
     else:
         return
 
-    # 1. Numeric tokens — must all appear in source.
-    reply_nums = set(re.findall(r"\d+(?:\.\d+)?", reply))
-    source_nums = set(re.findall(r"\d+(?:\.\d+)?", source_text))
+    # 1. Numeric tokens — must all appear in source. Normalize thousand
+    #    separators ("Rp 150.000" == "150000") so formatting never trips the
+    #    hallucination check.
+    def _norm_nums(text: str) -> set[str]:
+        nums = set()
+        for tok in re.findall(r"\d[\d.,]*", text):
+            digits = re.sub(r"[.,]", "", tok)
+            if digits:
+                nums.add(digits)
+        return nums
+
+    reply_nums = _norm_nums(reply)
+    source_nums = _norm_nums(source_text)
     invented_nums = reply_nums - source_nums
     if invented_nums:
         raise LLMValidationError(
@@ -1195,21 +1205,22 @@ def validate_reply(reply: str, source_row: dict | str | None) -> None:
             f"Reply contains stock status not in source: {sorted(reply_stock - source_stock)}"
         )
 
-    # 4. Strict price-format check — the reply must contain the source price verbatim
-    #    if it mentions a price. Look for "Rp" anywhere in reply and ensure
-    #    a matching "Rp <digits>" pattern from source appears character-for-character.
+    # 4. Price check — if the reply mentions a price, its VALUE must match a
+    #    source price (thousand separators/whitespace ignored: "Rp 50.000" ==
+    #    "Rp50000"). Different value → reject; same value → allow.
+    def _price_value(tok: str) -> str:
+        return re.sub(r"[^0-9]", "", tok)
+
     reply_prices = re.findall(r"Rp\s*[\d.,]+", reply)
     if reply_prices:
-        # Normalize: any Rp <num> in reply must match at least one Rp <num> in source.
         source_prices = re.findall(r"Rp\s*[\d.,]+", source_text)
         if not source_prices:
             raise LLMValidationError(
                 f"Reply mentions price but source has no price: {reply_prices}"
             )
+        source_values = {_price_value(sp) for sp in source_prices}
         for rp in reply_prices:
-            # Normalize whitespace and check substring match against each source price.
-            rp_norm = re.sub(r"\s+", " ", rp).strip()
-            if not any(rp_norm == re.sub(r"\s+", " ", sp).strip() for sp in source_prices):
+            if _price_value(rp) not in source_values:
                 raise LLMValidationError(
-                    f"Reply price '{rp}' does not exactly match any source price"
+                    f"Reply price '{rp}' does not match any source price"
                 )

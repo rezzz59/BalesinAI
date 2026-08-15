@@ -70,10 +70,15 @@ def test_validate_reply_handles_dict_or_string_source_row():
     validate_reply("Hoodie Rp 100.000 ready", source_str)
 
 
-def test_validate_reply_rejects_reformatted_price():
-    # "Rp 50.000" must not appear as "Rp50,000" or "50000" in reply.
+def test_validate_reply_accepts_same_value_different_formatting():
+    """Same numeric value with different thousand-separator formatting must pass
+    (150.000 == 150000), while a genuinely different number must be rejected."""
     source = {"price": "Rp 50.000"}
+    validate_reply("Harga Rp 50.000 ya", source)  # verbatim
+    validate_reply("Harga Rp50000 ya", source)    # same value, no separator
+    validate_reply("Harga 50.000 ya", source)     # same value
+    validate_reply("Harga Rp 50.000 saja", source)
     with pytest.raises(LLMValidationError):
-        validate_reply("Harga Rp 50000 ya", source)
+        validate_reply("Harga Rp 500.000 ya", source)  # different value
     with pytest.raises(LLMValidationError):
-        validate_reply("Harga Rp50,000 ya", source)
+        validate_reply("Harga Rp 5.000 ya", source)    # different value
