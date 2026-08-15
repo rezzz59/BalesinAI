@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     ai_router_api_key: str = ""
     ai_router_base_url: str = "http://localhost:20128/v1"
     ai_router_model: str = "kr/deepseek-3.2"
+    ai_router_compose_model: str = ""  # empty -> same as ai_router_model (classify model)
 
     # Optional base URL for AdaCode (default: https://api.adacode.ai)
     adacode_base_url: str | None = None

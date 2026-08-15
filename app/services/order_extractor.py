@@ -95,6 +95,10 @@ def _find_quantity(message: str, product_name: str) -> int:
         m = re.search(re.escape(token) + r"[^0-9]{0,4}(\d{1,3})", message, flags=re.IGNORECASE)
         if m:
             return int(m.group(1))
+    # Bare trailing number ("kaos hitam L 2" -> 2).
+    m = re.search(r"\b(\d{1,3})\s*$", message)
+    if m:
+        return int(m.group(1))
     return 1
 
 
@@ -224,17 +228,33 @@ def _name_tokens(text: str) -> set[str]:
 
 
 def _row_color_terms(name: str) -> set[str]:
-    """Color tokens in a catalog row name ("Family - Color - Size X").
+    """Color tokens in a catalog row name.
 
-    Returns the middle segment's tokens, so "Kaos - Sage Green - Size L" yields
-    {"sage", "green"} and a monochrome row with no color yields {}.
+    Handles three naming conventions:
+      - "Family - Color - Size X"     (middle segment, e.g. "Sage Green")
+      - "Family Warna Hitam - Size M" (color inline after "warna")
+      - fixed Indonesian color words anywhere as standalone tokens
+
+    The middle segment is only read as color when it's short (a color phrase is
+    1-3 words); a long description segment ("baju kaos pria wanita ... cotton")
+    is not a color.
     """
-    parts = _normalize(name).split(" - ")
-    return set(parts[1].split()) if len(parts) >= 2 else set()
+    norm = _normalize(name)
+    terms: set[str] = set()
+    parts = norm.split(" - ")
+    if len(parts) >= 3 and 1 <= len(parts[1].split()) <= 3:
+        terms |= set(parts[1].split())
+    for m in re.finditer(r"warna\s+([a-z]+(?:\s+[a-z]+)?)", norm):
+        terms.update(m.group(1).split())
+    for c in _COLORS:
+        if re.search(rf"\b{c}\b", norm):
+            terms.add(c)
+    return terms
 
 
 def _msg_color_terms(rows: list[dict], msg: str) -> set[str]:
-    """Color tokens named in *msg*, learned from the catalog's own color labels.
+    """Color tokens named in *msg*, from the catalog's own color labels plus the
+    fixed _COLORS list.
 
     Handles compound colors like "dusty pink"/"sage green" that aren't in the
     fixed _COLORS list: any catalog color term that appears (even inside a
@@ -246,6 +266,9 @@ def _msg_color_terms(rows: list[dict], msg: str) -> set[str]:
     known = set()
     for r in rows:
         known |= _row_color_terms(r.get("nama_produk") or "")
+    for c in _COLORS:
+        if re.search(rf"\b{c}\b", msg):
+            known.add(c)
     return {t for t in known if t in msg}
 
 
@@ -287,6 +310,12 @@ def extract_size_color(message: str) -> tuple[str | None, str | None]:
     m = _SIZE_RE.search(message or "")
     if m:
         size = m.group(1).upper()
+    else:
+        # Bare size token without "size"/"ukuran" prefix ("kaos hitam L 2").
+        # Whole-word only; single letters are size intent in an order message.
+        m = re.search(r"\b(XXXL|XXL|XL|XS|[SML])\b", message or "", re.IGNORECASE)
+        if m:
+            size = m.group(1).upper()
     color = None
     lower = (message or "").lower()
     for c in _COLORS:

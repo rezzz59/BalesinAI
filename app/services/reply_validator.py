@@ -64,11 +64,19 @@ def _count_questions(text: str) -> int:
 
 
 def _ends_with_question(text: str) -> bool:
-    """True if the reply ends with a guiding question (ignoring trailing emoji/spaces)."""
+    """True if the reply ends with a guiding question (ignoring trailing
+    emoji/spaces/punctuation and a trailing parenthetical like "(size chart...)").
+    """
     t = text.strip()
     while t:
         if t[-1] in {"?", "؟"}:
             return True
+        if t[-1] == ")":
+            # Strip a trailing parenthetical: "ukuran apa? (size chart M..)"
+            open_idx = t.rfind("(")
+            if open_idx != -1:
+                t = t[:open_idx].rstrip()
+                continue
         if t[-1].isspace() or t[-1] in {".", ",", "!", ":"} or _EMOJI_PATTERN.findall(t[-1]):
             t = t[:-1].strip()
             continue

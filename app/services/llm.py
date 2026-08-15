@@ -63,6 +63,24 @@ def _first_json_object(text: str) -> dict:
     raise ValueError("no JSON object found in text")
 
 
+_REASONING_LEAK = re.compile(
+    r"^(we need|let me|let's|okay|first|the user|need to|i need|to answer|here's|"
+    r"the question|we should|this (?:is|appears)|based on|we have|the system|"
+    r"the message|so,? the|alright)\b",
+    re.IGNORECASE,
+)
+
+
+def _looks_like_reasoning_leak(content: str) -> bool:
+    """True when a reply starts with English chain-of-thought markers.
+
+    Some reasoning models (deepseek-v4-flash) leak their thinking into `content`
+    even with thinking disabled. A genuine sales reply starts with "Halo Kak",
+    "Siap", etc., never with "We need to analyze" or "Let me think".
+    """
+    return bool(_REASONING_LEAK.match((content or "").strip()))
+
+
 class LLMError(Exception):
     """Raised when LLM call fails or returns invalid output."""
 
@@ -277,26 +295,29 @@ class AdaCodeLLMClient(LLMClient):
     prompting a chat model, mirroring the Gemini/Anthropic clients.
     """
 
-    def __init__(self, api_key: str, base_url: str = "https://api.adacode.ai", model: str = "claude-sonnet-4-6"):
+    def __init__(self, api_key: str, base_url: str = "https://api.adacode.ai", model: str = "claude-sonnet-4-6", compose_model: str | None = None):
         self._api_key = api_key
         self._base_url = (base_url or "https://api.adacode.ai").rstrip("/")
         self._model = model
+        self._compose_model = compose_model
         self._session = httpx.Client(timeout=60.0)
 
-    def _chat(self, system: str, messages: list[dict[str, str]], max_tokens: int = 512, json_mode: bool = False, _retries: int = 2) -> str:
+    def _chat(self, system: str, messages: list[dict[str, str]], max_tokens: int = 512, json_mode: bool = False, _retries: int = 2, model: str | None = None, disable_thinking: bool = False) -> str:
         """POST /v1/chat/completions and return the assistant text.
 
         Retries when the model returns an empty content — reasoning-style
         models occasionally emit only reasoning and no final content.
         """
         payload = {
-            "model": self._model,
+            "model": model or self._model,
             "messages": [{"role": "system", "content": system}] + messages,
             "max_tokens": max_tokens,
             "stream": False,
         }
         if json_mode:
             payload["response_format"] = {"type": "json_object"}
+        if disable_thinking:
+            payload["thinking"] = {"type": "disabled"}
         resp = self._session.post(
             f"{self._base_url}/v1/chat/completions",
             headers={"Authorization": f"Bearer {self._api_key}"},
@@ -310,7 +331,9 @@ class AdaCodeLLMClient(LLMClient):
         if body.startswith("data:") or "\ndata:" in body:
             content = _extract_sse_content(body)
             if not content and _retries > 0:
-                return self._chat(system, messages, max_tokens=max_tokens, _retries=_retries - 1)
+                return self._chat(system, messages, max_tokens=max_tokens, json_mode=json_mode, _retries=_retries - 1, model=model, disable_thinking=disable_thinking)
+            if _looks_like_reasoning_leak(content) and _retries > 0:
+                return self._chat(system, messages, max_tokens=max_tokens, json_mode=json_mode, _retries=_retries - 1, model=model, disable_thinking=disable_thinking)
             return content
         # Some routers (e.g. 9Router combo) append an SSE "data: [DONE]" tail to
         # otherwise-non-streaming responses; strip it before parsing.
@@ -318,11 +341,18 @@ class AdaCodeLLMClient(LLMClient):
             body = body[: body.rindex("data: [DONE]")].rstrip()
         data = json.loads(body)
         try:
-            content = data["choices"][0]["message"]["content"].strip()
+            msg = data["choices"][0]["message"]
+            content = (msg.get("content") or "").strip()
+            # Reasoning models (deepseek-v4-pro) sometimes put the answer in
+            # reasoning_content and leave content empty — fall back to it.
+            if not content:
+                content = (msg.get("reasoning_content") or "").strip()
         except (KeyError, IndexError, TypeError) as e:
             raise LLMValidationError(f"Invalid AdaCode chat response format: {e}") from e
         if not content and _retries > 0:
-            return self._chat(system, messages, max_tokens=max_tokens, _retries=_retries - 1)
+            return self._chat(system, messages, max_tokens=max_tokens, json_mode=json_mode, _retries=_retries - 1, model=model, disable_thinking=disable_thinking)
+        if _looks_like_reasoning_leak(content) and _retries > 0:
+            return self._chat(system, messages, max_tokens=max_tokens, json_mode=json_mode, _retries=_retries - 1, model=model, disable_thinking=disable_thinking)
         return content
 
     def classify(self, message: str) -> ClassificationResult:
@@ -440,7 +470,7 @@ class AdaCodeLLMClient(LLMClient):
         """Internal compose via chat completions."""
         prompt = self._build_compose_prompt(message, retrieved_row, match_kind, customer_context, persona, with_history=with_history, messages=messages)
         try:
-            text = self._chat(prompt, [], max_tokens=2048)
+            text = self._chat(prompt, [], max_tokens=2048, model=self._compose_model, disable_thinking=True)
         except LLMValidationError:
             raise
         except httpx.HTTPStatusError as e:
@@ -904,6 +934,7 @@ def get_llm_client() -> LLMClient:
             api_key=settings.ai_router_api_key,
             base_url=settings.ai_router_base_url,
             model=settings.ai_router_model,
+            compose_model=settings.ai_router_compose_model or settings.ai_router_model,
         )
     if settings.adacode_api_key:
         return AdaCodeLLMClient(
@@ -940,6 +971,7 @@ def get_fallback_llm_client(priority_backends: list[str] | None = None) -> LLMCl
                     api_key=settings.ai_router_api_key,
                     base_url=settings.ai_router_base_url,
                     model=settings.ai_router_model,
+                    compose_model=settings.ai_router_compose_model or settings.ai_router_model,
                 )
                 clients.append(client)
                 logger.info("Added 9Router client to fallback chain")
@@ -1213,12 +1245,23 @@ def validate_reply(reply: str, source_row: dict | str | None) -> None:
 
     reply_prices = re.findall(r"Rp\s*[\d.,]+", reply)
     if reply_prices:
-        source_prices = re.findall(r"Rp\s*[\d.,]+", source_text)
-        if not source_prices:
+        source_values = {_price_value(sp) for sp in re.findall(r"Rp\s*[\d.,]+", source_text)}
+        # The catalog stores "harga": "57500" without an "Rp" prefix — read the
+        # field directly so a reply's "Rp 57500" validates against it.
+        if isinstance(source_row, dict):
+            for k in ("harga", "price"):
+                v = source_row.get(k)
+                if v is not None:
+                    d = re.sub(r"[^0-9]", "", str(v))
+                    if d:
+                        source_values.add(d)
+        # Bare 4+ digit numbers in the source are prices, not sizes ("48"/"70") or
+        # fabric counts ("24s") or percents ("100%").
+        source_values |= {m for m in re.findall(r"\b\d{4,}\b", source_text)}
+        if not source_values:
             raise LLMValidationError(
                 f"Reply mentions price but source has no price: {reply_prices}"
             )
-        source_values = {_price_value(sp) for sp in source_prices}
         for rp in reply_prices:
             if _price_value(rp) not in source_values:
                 raise LLMValidationError(

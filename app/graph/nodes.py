@@ -7,7 +7,7 @@ from app.graph.state import ChatState
 from app.services.llm import LLMError, LLMValidationError, validate_reply
 from app.services.reply_validator import validate_sales_style
 from app.services.semantic_search import SemanticSearchClient, SemanticSearchError
-from app.services.sheets import FAQ_MATCH_THRESHOLD, _score_faq_row
+from app.services.sheets import FAQ_MATCH_THRESHOLD, READY_TRUE_VALUES, _score_faq_row
 
 logger = logging.getLogger(__name__)
 
@@ -400,7 +400,10 @@ def lookup_catalog(
                 best_cat_score = 0.0
                 best_cat_product = None
                 for product in products:
-                    score = _score_faq_row(state["message_text"], product)
+                    combined = " ".join(
+                        str(product.get(k) or "") for k in ("nama_produk", "deskripsi")
+                    )
+                    score = _score_faq_row(state["message_text"], {"text": combined})
                     if score > best_cat_score:
                         best_cat_score = score
                         best_cat_product = product
@@ -673,7 +676,7 @@ def _compose_with_llm(state: ChatState, llm_client: Any) -> dict:
                 retrieved_row=retrieved_row,
                 match_kind=match_kind,
                 customer_context=customer_context,  # Pass customer context for context-aware replies
-                persona=persona,  # Store-persona instruction per business_type
+                persona=(persona or "") + style_hint,  # Store-persona instruction per business_type
             )
             validate_reply(reply, retrieved_row)
             ok_style, style_msg = validate_sales_style(reply, message)
@@ -752,7 +755,7 @@ def _verbatim_fallback(state: ChatState) -> dict:
         }
     if state.get("product_match"):
         p = state["product_match"]
-        ready = "Ready stock" if p.get("ready") == "Y" else "❌ Habis"
+        ready = "Ready stock" if (p.get("ready") or "").strip().lower() in READY_TRUE_VALUES else "❌ Habis"
         return {
             "reply_text": (
                 f"{p['nama_produk']} — {p.get('harga', '-')}\n"
@@ -1057,6 +1060,7 @@ async def fallback_human(state: ChatState, gateway_client: Any) -> dict:
             phone=state["wa_number"],
             message=buyer_ack,
         )
+        result["reply_text"] = buyer_ack
         logger.info(
             "fallback_triggered",
             extra={

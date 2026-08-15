@@ -81,11 +81,20 @@ READY_TRUE_VALUES = frozenset({"y", "yes", "ya", "ada", "ready", "tersedia", "1"
 
 
 def _tokenize_meaningful(text: str) -> set[str]:
-    """Lowercase, split into words >=3 chars, drop Indonesian stopwords."""
+    """Lowercase, split into words >=3 chars, drop Indonesian stopwords and
+    common possessive/particle suffixes ("-nya", "-ku", "-mu", "-lah", "-kah")."""
     if not text:
         return set()
     tokens = re.findall(r"\w+", text.lower())
-    return {t for t in tokens if len(t) >= 3 and t not in STOPWORDS_ID}
+    suffixes = ("nya", "ku", "mu", "kah", "lah", "pun")
+    out = set()
+    for t in tokens:
+        for suf in suffixes:
+            if t.endswith(suf) and len(t) - len(suf) >= 3:
+                t = t[: -len(suf)]
+                break
+        out.add(t)
+    return {t for t in out if len(t) >= 3 and t not in STOPWORDS_ID}
 
 
 def _score_faq_row(message: str, row: dict) -> float:
