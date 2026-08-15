@@ -141,3 +141,62 @@ async def test_waha_attachment_appends_c_us_suffix(waha_gateway):
 def test_waha_error_is_phone_gateway_exception():
     from app.services.phone_gateway import PhoneGatewayException
     assert issubclass(WahaError, PhoneGatewayException)
+
+
+@pytest.mark.asyncio
+async def test_waha_start_session(waha_gateway):
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {"name": "test-session", "status": "SCAN_QR_CODE"}
+
+    with patch("app.services.waha.httpx.AsyncClient") as mock_client:
+        mock_post = AsyncMock(return_value=mock_response)
+        mock_client.return_value.__aenter__.return_value.post = mock_post
+        result = await waha_gateway.start_session(webhook_url="https://x/webhook")
+
+    assert result["name"] == "test-session"
+    payload = mock_post.call_args.kwargs.get("json")
+    assert payload["name"] == "test-session"
+    assert payload["config"]["webhooks"][0]["url"] == "https://x/webhook"
+
+
+@pytest.mark.asyncio
+async def test_waha_get_qr_data_uri(waha_gateway):
+    qr = "data:image/png;base64,AAAA"
+
+    with patch("app.services.waha.httpx.AsyncClient") as mock_client:
+        mock_get = AsyncMock(return_value=MagicMock(status_code=200, json=MagicMock(return_value={"qr": qr})))
+        mock_client.return_value.__aenter__.return_value.get = mock_get
+        result = await waha_gateway.get_qr()
+
+    assert result == qr
+
+
+@pytest.mark.asyncio
+async def test_waha_session_status_working(waha_gateway):
+    with patch("app.services.waha.httpx.AsyncClient") as mock_client:
+        mock_get = AsyncMock(return_value=MagicMock(status_code=200, json=MagicMock(return_value={"status": "WORKING"})))
+        mock_client.return_value.__aenter__.return_value.get = mock_get
+        status = await waha_gateway.session_status()
+
+    assert status == "WORKING"
+
+
+@pytest.mark.asyncio
+async def test_waha_device_profile(waha_gateway):
+    with patch("app.services.waha.httpx.AsyncClient") as mock_client:
+        mock_get = AsyncMock(return_value=MagicMock(status_code=200, json=MagicMock(return_value={"id": "628123456789@c.us"})))
+        mock_client.return_value.__aenter__.return_value.get = mock_get
+        profile = await waha_gateway.device_profile()
+
+    assert profile["id"] == "628123456789@c.us"
+
+
+@pytest.mark.asyncio
+async def test_waha_logout(waha_gateway):
+    with patch("app.services.waha.httpx.AsyncClient") as mock_client:
+        mock_delete = AsyncMock(return_value=MagicMock(status_code=200, json=MagicMock(return_value={"ok": True})))
+        mock_client.return_value.__aenter__.return_value.delete = mock_delete
+        await waha_gateway.logout()
+
+    mock_delete.assert_awaited_once()

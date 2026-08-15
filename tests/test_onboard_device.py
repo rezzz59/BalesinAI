@@ -9,6 +9,7 @@ from app.config import get_settings
 @pytest.fixture
 def client(monkeypatch):
     monkeypatch.setenv("FONNTE_ACCOUNT_TOKEN", "test-account-token")
+    monkeypatch.setenv("GATEWAY_PROVIDER", "fonnte")  # this file tests the Fonnte path
     monkeypatch.setenv("ENCRYPTION_KEY", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
     monkeypatch.setenv("GEMINI_API_KEY", "dummy")
     monkeypatch.setenv("GOOGLE_SHEETS_CREDENTIALS_JSON_PATH", "dummy")

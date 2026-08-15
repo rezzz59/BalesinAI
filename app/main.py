@@ -37,6 +37,7 @@ from app.services.local_data import LocalDataClient
 from app.services.sheets import GoogleSheetsClient
 from app.services.phone_gateway import PhoneGatewayException
 from app.services.fonnte import FonnteGateway, FonnteError
+from app.services.waha import WahaGateway
 from app.services.crypto import decrypt_api_key
 from app.services.followup import auto_followup_loop
 import asyncio
@@ -114,13 +115,22 @@ def _get_tenant_clients(tenant_id: str, config: TenantConfig, settings: "Setting
             spreadsheet_id=config.get("google_sheet_id", ""),
         )
 
-    # 3. Create Fonnte gateway with tenant's decrypted API key
-    enc_key = settings.encryption_key
-    wa_api_key_encrypted = config.get("wa_api_key_encrypted", "")
-    if not wa_api_key_encrypted:
-        raise ValueError("Missing wa_api_key_encrypted in tenant config")
-    wa_api_key = decrypt_api_key(wa_api_key_encrypted, enc_key)
-    gateway = FonnteGateway(api_key=wa_api_key)
+    # 3. Create the WhatsApp gateway: self-hosted WAHA by default (safe, own
+    #    IP, per-tenant session), with Fonnte as fallback for tenants/users who
+    #    accept the shared-gateway risk. Switched via GATEWAY_PROVIDER.
+    if settings.gateway_provider == "fonnte":
+        enc_key = settings.encryption_key
+        wa_api_key_encrypted = config.get("wa_api_key_encrypted", "")
+        if not wa_api_key_encrypted:
+            raise ValueError("Missing wa_api_key_encrypted in tenant config")
+        wa_api_key = decrypt_api_key(wa_api_key_encrypted, enc_key)
+        gateway = FonnteGateway(api_key=wa_api_key)
+    else:
+        gateway = WahaGateway(
+            base_url=settings.waha_base_url,
+            session_name=tenant_id,
+            api_key=settings.waha_api_key,
+        )
 
     clients = (llm_client, sheets_client, gateway)
     _cached_clients[tenant_id] = clients

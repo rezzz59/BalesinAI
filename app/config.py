@@ -35,6 +35,9 @@ class Settings(BaseSettings):
     encryption_key: str = ""
     fonnte_api_key: str = ""  # API key for Fonnte WhatsApp Gateway
     fonnte_account_token: str = ""  # Fonnte ACCOUNT token (for add-device/QR)
+    gateway_provider: str = "waha"  # "waha" (self-hosted) | "fonnte" (shared gateway)
+    waha_base_url: str = "http://localhost:3000"  # WAHA self-hosted base URL
+    waha_api_key: str = ""  # WAHA API key (WHATSAPP_API_KEY in WAHA env)
     base_url: str = "http://localhost:8000"  # public base URL for media attachments
     google_sheets_credentials_json_path: str = "./secrets/sheets-sa.json"
     google_sheets_spreadsheet_id: str = ""  # filled from tenant context or env

@@ -295,12 +295,49 @@ async def set_tier(request: Request):
     return {"status": "ok", "tier": tier, "gateway_plan": TIER_GATEWAY[tier]}
 
 
+async def _provision_waha(tenant: dict, device_wa: str, settings) -> dict:
+    """Start the tenant's WAHA session and return its pairing QR (base64)."""
+    from app.services.waha import WahaGateway, WahaError
+
+    gateway = WahaGateway(
+        base_url=settings.waha_base_url,
+        session_name=tenant["tenant_id"],
+        api_key=settings.waha_api_key,
+    )
+    webhook_url = f"{settings.base_url.rstrip('/')}/webhook/whatsapp/"
+    try:
+        await gateway.start_session(webhook_url=webhook_url)
+        qr = await gateway.get_qr()
+    except WahaError as e:
+        raise HTTPException(status_code=502, detail=f"Gagal mulai sesi WAHA: {e}")
+
+    insert_or_update_tenant(
+        tenant_id=tenant["tenant_id"],
+        wa_api_key_encrypted=tenant.get("wa_api_key_encrypted", b""),
+        google_sheet_id=tenant.get("google_sheet_id", ""),
+        owner_wa_number=tenant["owner_wa_number"],
+        business_type=tenant["business_type"],
+        onboarding_status=tenant["onboarding_status"],
+        onboarding_data=None,
+        fonnte_device_id=device_wa,
+        data_source=tenant["data_source"],
+    )
+    update_device_status(tenant["tenant_id"], "pending")
+    return {
+        "status": "ok",
+        "device": device_wa,
+        "qr": qr or "",
+        "device_status": "pending",
+    }
+
+
 @router.post("/device")
 async def provision_device(request: Request):
-    """Create a Fonnte device for the user's WhatsApp number and return the QR.
+    """Pair the user's WhatsApp number and return the QR to scan.
 
-    Uses the platform's Fonnte ACCOUNT token (create device + QR via API) so the
-    user only needs to scan the QR — no Fonnte account, no token pasting.
+    Two providers:
+    - WAHA (default, self-hosted): start a per-tenant session and return its QR.
+    - Fonnte (fallback): create a Fonnte device + QR via the platform account token.
     Body: {device_wa} — the user's business WhatsApp number.
     """
     user = current_user(request)
@@ -311,6 +348,10 @@ async def provision_device(request: Request):
         raise HTTPException(status_code=400, detail="Nomor WhatsApp device wajib diisi.")
 
     settings = get_settings()
+
+    if settings.gateway_provider != "fonnte":
+        return await _provision_waha(tenant, device_wa, settings)
+
     account_token = settings.fonnte_account_token
     if not account_token:
         raise HTTPException(status_code=503, detail="Gateway belum dikonfigurasi. Hubungi admin.")
@@ -409,6 +450,9 @@ async def device_status(request: Request):
 
     if status == "pending":
         settings = get_settings()
+        if settings.gateway_provider != "fonnte":
+            return await _waha_device_status(tenant, intended, settings, status, real_number, valid)
+
         account_token = settings.fonnte_account_token
         if account_token:
             try:
@@ -455,6 +499,56 @@ async def device_status(request: Request):
                                 update_device_status(tenant["tenant_id"], "connected")
             except Exception:  # noqa: BLE001
                 pass  # keep current status; frontend can retry
+
+    return {
+        "device": real_number,
+        "device_status": status,
+        "device_match": valid,
+        "tier": tenant.get("tier", "basic"),
+        "gateway_plan": tenant.get("gateway_plan", "lite"),
+    }
+
+
+async def _waha_device_status(tenant: dict, intended: str, settings, status: str, real_number: str, valid):
+    """Resolve WAHA session pairing status and validate the scanned number."""
+    from app.services.waha import WahaGateway
+
+    try:
+        gateway = WahaGateway(
+            base_url=settings.waha_base_url,
+            session_name=tenant["tenant_id"],
+            api_key=settings.waha_api_key,
+        )
+        waha_status = await gateway.session_status()
+        if waha_status == "WORKING":
+            profile = await gateway.device_profile()
+            scanned = str(profile.get("id") or profile.get("device") or "").replace("@c.us", "").replace("@s.whatsapp.net", "").replace("+", "").replace("-", "")
+            if scanned:
+                real_number = scanned
+                valid = _normalize_wa(scanned) == _normalize_wa(intended)
+                if not valid:
+                    try:
+                        await gateway.logout()
+                    except Exception:  # noqa: BLE001
+                        pass
+                    update_device_status(tenant["tenant_id"], "rejected")
+                    status = "rejected"
+                    logger.warning(
+                        "device_number_rejected",
+                        extra={"tenant": tenant["tenant_id"], "intended": intended, "scanned": scanned},
+                    )
+                else:
+                    update_device_status(tenant["tenant_id"], "connected")
+                    status = "connected"
+            else:
+                update_device_status(tenant["tenant_id"], "connected")
+                status = "connected"
+        elif waha_status in ("SCAN_QR_CODE", "SCAN_REQUIRED"):
+            status = "pending"  # still waiting for the scan
+        elif waha_status == "STOPPED":
+            status = "disconnect"
+    except Exception:  # noqa: BLE001
+        pass  # keep current status; frontend can retry
 
     return {
         "device": real_number,

@@ -236,7 +236,8 @@
                 qrBox.classList.remove('hidden');
                 const qrImg = document.getElementById('qrImg');
                 if (d.qr) {
-                    qrImg.src = 'data:image/png;base64,' + d.qr;
+                    // Fonnte returns raw base64; WAHA may return a data: URI already.
+                    qrImg.src = d.qr.startsWith('data:') ? d.qr : ('data:image/png;base64,' + d.qr);
                     document.getElementById('qrStatus').textContent =
                         'Scan QR dengan nomor WhatsApp yang ingin jadi bot (nomor yang di-scan lah yang terhubung).';
                     pollDeviceStatus();
