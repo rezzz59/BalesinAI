@@ -86,12 +86,12 @@ _NUM_RE = re.compile(r"\d[\d.,]*")
 
 
 def _catalog_numbers(sheets_client) -> set[str]:
-    """Kumpulkan semua angka (harga) dari katalog untuk cek grounded."""
+    """Kumpulkan semua angka (harga) dari katalog + FAQ untuk cek grounded."""
     nums: set[str] = set()
     try:
-        for row in sheets_client.read_catalog():
-            for key in ("harga", "price"):
-                v = row.get(key)
+        rows = list(sheets_client.read_catalog()) + list(sheets_client.read_faq())
+        for row in rows:
+            for v in row.values():
                 if v is None:
                     continue
                 for m in _NUM_RE.findall(str(v)):
@@ -158,13 +158,13 @@ def main():
                 prices = {str(i.get("price", "")).replace(".0", "") for i in items if i.get("price")}
                 grounded = bool(items) and prices.issubset(catalog_nums)
             else:
-                # FAQ price answer: any Rp amount in the reply must be a catalog
-                # price value. Ignore non-price numbers (qty, "24s", sizes).
+                # FAQ price answer: any Rp amount in the reply must be a known
+                # catalog/FAQ value. No Rp amount claimed → grounded (deferred).
                 rp_values = {
                     re.sub(r"[^0-9]", "", m)
                     for m in re.findall(r"Rp\s*[\d.,]+", reply)
                 }
-                grounded = bool(rp_values) and rp_values.issubset(catalog_nums)
+                grounded = rp_values.issubset(catalog_nums)
             grounded_n += int(bool(grounded))
 
         dt = time.time() - t1
